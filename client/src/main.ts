@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { ensureAudio, playAttackSound, sounds } from './audio.js';
 import { makeWeapon } from './character.js';
-import { ATTACK_CONFIG, CLASS_LABELS, CLASS_MAX_HP, CLASS_MOVE } from './gameConfig.js';
+import { ATTACK_CONFIG, CLASS_LABELS, CLASS_MAX_HP, CLASS_MOVE, GI_GUN } from './gameConfig.js';
 import { Network } from './network.js';
 import { RemotePlayers } from './remote.js';
 import type { AttackEffect, AttackKind, DamageEvent, PlayerClass, PlayerState } from './types.js';
@@ -175,6 +175,12 @@ const input = {
   nextAttackAt: 0,
   reloadAnim: 0,
   localAnim: null as { kind: AttackKind; time: number } | null,
+};
+
+const recoil = {
+  pitch: 0,
+  yaw: 0,
+  weaponKick: 0,
 };
 
 let hasJoined = false;
@@ -484,7 +490,43 @@ function fireAttack(kind: AttackKind, charge = 0) {
   const direction = new THREE.Vector3();
   camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
+  if (kind === 'gi-shot') applyGiSpread(direction);
   network.sendAttack(kind, origin, direction, charge, visualOrigin);
+  if (kind === 'gi-shot') applyGiRecoil();
+}
+
+function applyGiSpread(direction: THREE.Vector3) {
+  const spread = input.aimHeld ? GI_GUN.aimedSpreadRad : GI_GUN.spreadRad;
+  const yaw = (Math.random() * 2 - 1) * spread;
+  const pitch = (Math.random() * 2 - 1) * spread;
+  const right = new THREE.Vector3().crossVectors(direction, UP).normalize();
+  const up = new THREE.Vector3().crossVectors(right, direction).normalize();
+  direction.addScaledVector(right, yaw).addScaledVector(up, pitch).normalize();
+}
+
+function applyGiRecoil() {
+  const mult = input.aimHeld ? GI_GUN.aimedRecoilMult : 1;
+  const pitchKick = GI_GUN.recoilPitchRad * mult * (0.75 + Math.random() * 0.5);
+  const yawKick = GI_GUN.recoilYawRad * mult * (Math.random() * 2 - 1);
+  const nextPitch = THREE.MathUtils.clamp(
+    camera.rotation.x + pitchKick,
+    -Math.PI / 2 + 0.01,
+    Math.PI / 2 - 0.01,
+  );
+  const appliedPitch = nextPitch - camera.rotation.x;
+  camera.rotation.x = nextPitch;
+  camera.rotation.y += yawKick;
+  recoil.pitch = THREE.MathUtils.clamp(
+    recoil.pitch + appliedPitch,
+    -GI_GUN.maxRecoverablePitchRad,
+    GI_GUN.maxRecoverablePitchRad,
+  );
+  recoil.yaw = THREE.MathUtils.clamp(
+    recoil.yaw + yawKick,
+    -GI_GUN.maxRecoverableYawRad,
+    GI_GUN.maxRecoverableYawRad,
+  );
+  recoil.weaponKick = Math.min(1, recoil.weaponKick + 0.42);
 }
 
 function getWeaponTipWorld(): THREE.Vector3 {
@@ -507,6 +549,10 @@ function playLocalAttack(kind: AttackKind) {
 function updateWeaponAnimation(dt: number) {
   if (!viewWeapon) return;
   const basePos = new THREE.Vector3(0.36, -0.28, -0.62);
+  if (localStats.className === 'gi') {
+    basePos.y -= recoil.weaponKick * 0.025;
+    basePos.z += recoil.weaponKick * 0.1;
+  }
   const baseRot = new THREE.Euler(-0.05, -0.22, -0.08);
   const magazine = viewWeapon.getObjectByName('magazine');
 
@@ -578,6 +624,21 @@ function updateWeaponAnimation(dt: number) {
   viewWeapon.rotation.x += (baseRot.x - viewWeapon.rotation.x) * (1 - Math.exp(-dt * 16));
   viewWeapon.rotation.y += (baseRot.y - viewWeapon.rotation.y) * (1 - Math.exp(-dt * 16));
   viewWeapon.rotation.z += (baseRot.z - viewWeapon.rotation.z) * (1 - Math.exp(-dt * 16));
+}
+
+function updateRecoil(dt: number) {
+  const alpha = 1 - Math.exp(-dt * 9);
+  const pitchRecover = recoil.pitch * alpha;
+  const yawRecover = recoil.yaw * alpha;
+  camera.rotation.x = THREE.MathUtils.clamp(
+    camera.rotation.x - pitchRecover,
+    -Math.PI / 2 + 0.01,
+    Math.PI / 2 - 0.01,
+  );
+  camera.rotation.y -= yawRecover;
+  recoil.pitch -= pitchRecover;
+  recoil.yaw -= yawRecover;
+  recoil.weaponKick += (0 - recoil.weaponKick) * (1 - Math.exp(-dt * 18));
 }
 
 type TimedObject = { obj: THREE.Object3D; life: number; maxLife: number };
@@ -856,6 +917,7 @@ function tick() {
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 16));
   camera.updateProjectionMatrix();
 
+  updateRecoil(dt);
   updateWeaponAnimation(dt);
   updateTimedObjects(dt);
   updateFlyingParts(dt);

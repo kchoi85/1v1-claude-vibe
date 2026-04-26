@@ -28,3 +28,13 @@ export const ATTACK_CONFIG: Record<
   'assassin-slash': { color: 0xe8f6ff, cooldown: 420 },
   'assassin-charged': { color: 0xff4f72, cooldown: 850 },
 };
+
+export const GI_GUN = {
+  spreadRad: 0.018,
+  aimedSpreadRad: 0.006,
+  recoilPitchRad: 0.012,
+  recoilYawRad: 0.008,
+  aimedRecoilMult: 0.55,
+  maxRecoverablePitchRad: 0.14,
+  maxRecoverableYawRad: 0.08,
+};
