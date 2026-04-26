@@ -5,6 +5,7 @@ import type {
   ClientMessage,
   PlayerClass,
   PlayerState,
+  RoundOverEvent,
   ServerMessage,
 } from './types.js';
 
@@ -22,6 +23,7 @@ export class Network {
   onAttack?: (effect: AttackEffect) => void;
   onDamage?: (event: DamageEvent) => void;
   onReloaded?: (ammo: number) => void;
+  onRoundOver?: (event: RoundOverEvent) => void;
 
   connect(url: string) {
     const ws = new WebSocket(url);
@@ -53,6 +55,8 @@ export class Network {
         this.onDamage?.(msg.event);
       } else if (msg.t === 'reloaded') {
         this.onReloaded?.(msg.ammo);
+      } else if (msg.t === 'roundOver') {
+        this.onRoundOver?.(msg.event);
       } else if (msg.t === 'leave') {
         this.onLeave?.(msg.id);
       }

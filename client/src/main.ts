@@ -16,7 +16,10 @@ const statusEl = document.getElementById('status')!;
 const scoreMeEl = document.getElementById('score-me')!;
 const scoreOppEl = document.getElementById('score-opp')!;
 const playerListEl = document.getElementById('player-list')!;
+const weaponLabelEl = document.getElementById('weapon-label')!;
 const ammoCountEl = document.getElementById('ammo-count')!;
+const hpTextEl = document.getElementById('hp-text')!;
+const hpFillEl = document.getElementById('hp-fill') as HTMLDivElement;
 const hitXEl = document.getElementById('hit-x')!;
 const damageLayer = document.getElementById('damage-layer')!;
 const classCards = Array.from(document.querySelectorAll<HTMLButtonElement>('.class-card'));
@@ -31,6 +34,12 @@ const CLASS_MOVE: Record<PlayerClass, { walk: number; sprint: number }> = {
   gi: { walk: 6, sprint: 1.6 },
   mage: { walk: 6, sprint: 1.6 },
   assassin: { walk: 8.2, sprint: 2.25 },
+};
+
+const CLASS_MAX_HP: Record<PlayerClass, number> = {
+  gi: 150,
+  mage: 100,
+  assassin: 100,
 };
 
 const ATTACK_CONFIG: Record<
@@ -50,6 +59,78 @@ function renderScore() {
   scoreOppEl.textContent = String(score.opp);
 }
 renderScore();
+
+let audioCtx: AudioContext | null = null;
+function audio(): AudioContext | null {
+  const AudioContextCtor =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  audioCtx ??= new AudioContextCtor();
+  if (audioCtx.state === 'suspended') void audioCtx.resume();
+  return audioCtx;
+}
+
+function tone(freq: number, duration: number, type: OscillatorType, gain = 0.08, delay = 0) {
+  const ctx = audio();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const vol = ctx.createGain();
+  const start = ctx.currentTime + delay;
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, start);
+  vol.gain.setValueAtTime(gain, start);
+  vol.gain.exponentialRampToValueAtTime(0.001, start + duration);
+  osc.connect(vol).connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + duration);
+}
+
+function noise(duration: number, gain = 0.05, delay = 0) {
+  const ctx = audio();
+  if (!ctx) return;
+  const samples = Math.max(1, Math.floor(ctx.sampleRate * duration));
+  const buffer = ctx.createBuffer(1, samples, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < samples; i++) data[i] = Math.random() * 2 - 1;
+  const source = ctx.createBufferSource();
+  const vol = ctx.createGain();
+  const start = ctx.currentTime + delay;
+  source.buffer = buffer;
+  vol.gain.setValueAtTime(gain, start);
+  vol.gain.exponentialRampToValueAtTime(0.001, start + duration);
+  source.connect(vol).connect(ctx.destination);
+  source.start(start);
+  source.stop(start + duration);
+}
+
+const sounds = {
+  giShot() {
+    noise(0.045, 0.08);
+    tone(95, 0.055, 'square', 0.045);
+  },
+  caseDrop() {
+    tone(980, 0.035, 'triangle', 0.025, 0.16);
+    tone(1320, 0.025, 'triangle', 0.018, 0.22);
+  },
+  reload() {
+    tone(280, 0.08, 'sawtooth', 0.045);
+    tone(460, 0.06, 'triangle', 0.035, 0.42);
+    tone(210, 0.08, 'square', 0.035, 0.86);
+  },
+  magic(charged = false) {
+    tone(charged ? 330 : 520, charged ? 0.22 : 0.12, 'sine', 0.055);
+    tone(charged ? 880 : 760, charged ? 0.28 : 0.16, 'triangle', 0.04, 0.02);
+  },
+  slash() {
+    noise(0.09, 0.045);
+    tone(620, 0.07, 'sawtooth', 0.035);
+  },
+  ding() {
+    tone(784, 0.16, 'sine', 0.08);
+    tone(1175, 0.22, 'sine', 0.06, 0.08);
+  },
+};
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x202830);
@@ -180,6 +261,7 @@ const localStats = {
   maxHp: 150,
   ammo: 30,
   maxAmmo: 30,
+  score: 0,
   reloading: false,
 };
 
@@ -189,6 +271,7 @@ const input = {
   charging: false,
   chargeStart: 0,
   nextAttackAt: 0,
+  reloadAnim: 0,
   localAnim: null as { kind: AttackKind; time: number } | null,
 };
 
@@ -197,15 +280,21 @@ let selectedClass: PlayerClass = 'gi';
 let viewWeapon: THREE.Group | null = null;
 setViewWeapon(selectedClass);
 renderAmmo();
+renderHp();
 
 classCards.forEach((card) => {
   card.addEventListener('click', () => {
     const next = card.dataset.class as PlayerClass | undefined;
     if (!next) return;
     selectedClass = next;
+    if (!hasJoined) {
+      localStats.hp = CLASS_MAX_HP[next];
+      localStats.maxHp = CLASS_MAX_HP[next];
+    }
     classCards.forEach((c) => c.classList.toggle('selected', c === card));
     setViewWeapon(selectedClass);
     renderAmmo();
+    renderHp();
   });
 });
 
@@ -265,12 +354,15 @@ network.onState = (players) => {
     localStats.maxHp = me.maxHp;
     localStats.ammo = me.ammo;
     localStats.maxAmmo = me.maxAmmo;
+    localStats.score = me.score;
     if (selectedClass !== me.className) {
       selectedClass = me.className;
       setViewWeapon(selectedClass);
     }
     renderAmmo();
+    renderHp();
   }
+  updateScoreFromPlayers(players);
   remotes.sync(network.myId, players);
   renderPlayerList();
 };
@@ -290,18 +382,42 @@ network.onSpawn = ({ x, z, ry }) => {
 };
 network.onAttack = (effect) => {
   drawAttack(effect);
-  if (effect.attackerId !== network.myId) remotes.playAttack(effect.attackerId, effect.kind);
+  if (effect.attackerId !== network.myId) {
+    remotes.playAttack(effect.attackerId, effect.kind);
+    playAttackSound(effect.kind);
+  }
   if (effect.attackerId === network.myId) playLocalAttack(effect.kind);
 };
 network.onDamage = (event) => {
   showDamageNumber(event);
   if (event.attackerId === network.myId) showHitX();
+  if (event.targetId === network.myId) {
+    localStats.hp = event.hp;
+    localStats.maxHp = event.maxHp;
+    renderHp();
+  }
 };
 network.onReloaded = (ammo) => {
   localStats.reloading = false;
   localStats.ammo = ammo;
   renderAmmo();
 };
+network.onRoundOver = (event) => {
+  sounds.ding();
+  for (const item of event.scores) {
+    if (item.id === network.myId) score.me = item.score;
+    else score.opp = item.score;
+  }
+  renderScore();
+};
+
+function updateScoreFromPlayers(players: PlayerState[]) {
+  const me = players.find((p) => p.id === network.myId);
+  const opp = players.find((p) => p.id !== network.myId);
+  if (me) score.me = me.score;
+  if (opp) score.opp = opp.score;
+  renderScore();
+}
 
 function renderPlayerList() {
   playerListEl.innerHTML = '';
@@ -326,21 +442,39 @@ function renderPlayerList() {
 }
 
 function renderAmmo() {
-  if (localStats.className === 'gi') {
+  if (!hasJoined) {
+    weaponLabelEl.textContent = selectedClass === 'gi' ? 'Ammo' : 'Weapon';
+    ammoCountEl.textContent =
+      selectedClass === 'gi' ? '30/30' : selectedClass === 'mage' ? 'Wand' : 'Dagger';
+  } else if (localStats.className === 'gi') {
+    weaponLabelEl.textContent = 'Ammo';
     ammoCountEl.textContent = localStats.reloading
       ? 'Reloading'
       : `${localStats.ammo}/${localStats.maxAmmo}`;
-  } else if (selectedClass === 'gi' && !hasJoined) {
-    ammoCountEl.textContent = '30/30';
   } else {
+    weaponLabelEl.textContent = 'Weapon';
     ammoCountEl.textContent =
       selectedClass === 'mage' || localStats.className === 'mage' ? 'Wand' : 'Dagger';
   }
 }
 
+function renderHp() {
+  hpTextEl.textContent = `${localStats.hp}/${localStats.maxHp}`;
+  const pct =
+    localStats.maxHp > 0 ? THREE.MathUtils.clamp(localStats.hp / localStats.maxHp, 0, 1) : 0;
+  hpFillEl.style.width = `${pct * 100}%`;
+  hpFillEl.style.background =
+    pct > 0.55
+      ? 'linear-gradient(90deg, #35d07f, #b9f36b)'
+      : pct > 0.25
+        ? 'linear-gradient(90deg, #f2c94c, #f2994a)'
+        : 'linear-gradient(90deg, #eb5757, #ff8a65)';
+}
+
 joinBtn.disabled = true;
 
 function attemptJoin() {
+  audio();
   const raw = nameInput.value.trim().slice(0, 16);
   myName = raw.length > 0 ? raw : `Player`;
   if (!network.ws || network.ws.readyState !== WebSocket.OPEN) return;
@@ -394,7 +528,7 @@ function endSecondary() {
   if (!input.charging) return;
   const held = performance.now() - input.chargeStart;
   input.charging = false;
-  if (localStats.className === 'mage' && held >= 900) fireAttack('mage-charged', held / 1000);
+  if (localStats.className === 'mage' && held >= 1000) fireAttack('mage-charged', held / 1000);
   if (localStats.className === 'assassin' && held >= 300)
     fireAttack('assassin-charged', held / 1000);
 }
@@ -403,6 +537,10 @@ function reloadWeapon() {
   if (!hasJoined || localStats.className !== 'gi' || localStats.reloading) return;
   if (localStats.ammo >= localStats.maxAmmo) return;
   localStats.reloading = true;
+  input.fireHeld = false;
+  input.reloadAnim = 1.25;
+  sounds.reload();
+  dropMagazine();
   renderAmmo();
   network.sendReload();
 }
@@ -416,13 +554,41 @@ function fireAttack(kind: AttackKind, charge = 0) {
   if (config.localAmmo) {
     localStats.ammo = Math.max(0, localStats.ammo - 1);
     renderAmmo();
+    sounds.giShot();
+    sounds.caseDrop();
+    dropBulletCase();
+    if (localStats.ammo <= 0) setTimeout(reloadWeapon, 80);
+  } else if (kind === 'mage-shot' || kind === 'mage-charged') {
+    sounds.magic(kind === 'mage-charged');
+  } else {
+    sounds.slash();
   }
 
-  const origin = new THREE.Vector3();
+  const origin = getWeaponTipWorld();
   const direction = new THREE.Vector3();
-  camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
   network.sendAttack(kind, origin, direction, charge);
+}
+
+function getWeaponTipWorld(): THREE.Vector3 {
+  if (!viewWeapon) return camera.getWorldPosition(new THREE.Vector3());
+  const tipByClass: Record<PlayerClass, THREE.Vector3> = {
+    gi: new THREE.Vector3(0, 0.02, -0.9),
+    mage: new THREE.Vector3(0, 0, -0.78),
+    assassin: new THREE.Vector3(0, 0, -0.66),
+  };
+  return viewWeapon.localToWorld(tipByClass[localStats.className].clone());
+}
+
+function playAttackSound(kind: AttackKind) {
+  if (kind === 'gi-shot') {
+    sounds.giShot();
+    sounds.caseDrop();
+  } else if (kind === 'mage-shot' || kind === 'mage-charged') {
+    sounds.magic(kind === 'mage-charged');
+  } else {
+    sounds.slash();
+  }
 }
 
 function playLocalAttack(kind: AttackKind) {
@@ -436,6 +602,27 @@ function updateWeaponAnimation(dt: number) {
   if (!viewWeapon) return;
   const basePos = new THREE.Vector3(0.36, -0.28, -0.62);
   const baseRot = new THREE.Euler(-0.05, -0.22, -0.08);
+  const magazine = viewWeapon.getObjectByName('magazine');
+
+  if (input.reloadAnim > 0 && localStats.className === 'gi') {
+    input.reloadAnim = Math.max(0, input.reloadAnim - dt);
+    const p = 1 - input.reloadAnim / 1.25;
+    if (magazine) magazine.visible = p < 0.18 || p > 0.72;
+    viewWeapon.position.set(
+      basePos.x - 0.08 * Math.sin(p * Math.PI),
+      basePos.y - 0.06 * Math.sin(p * Math.PI * 1.5),
+      basePos.z + 0.08 * Math.sin(p * Math.PI),
+    );
+    viewWeapon.rotation.set(
+      baseRot.x - 0.25 * Math.sin(p * Math.PI),
+      baseRot.y - 0.18,
+      baseRot.z + 0.25 * Math.sin(p * Math.PI),
+    );
+    if (input.reloadAnim <= 0 && magazine) magazine.visible = true;
+    return;
+  }
+
+  if (magazine) magazine.visible = true;
 
   if (input.charging && localStats.className === 'mage') {
     const t = (performance.now() - input.chargeStart) / 1000;
@@ -445,7 +632,7 @@ function updateWeaponAnimation(dt: number) {
       baseRot.y + Math.cos(t * 7) * 0.22,
       baseRot.z + t * 5,
     );
-    if (t > 1.25) {
+    if (t >= 1) {
       input.charging = false;
       fireAttack('mage-charged', t);
     }
@@ -489,6 +676,42 @@ function updateWeaponAnimation(dt: number) {
 
 type TimedObject = { obj: THREE.Object3D; life: number; maxLife: number };
 const timedObjects: TimedObject[] = [];
+type FlyingPart = { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; life: number };
+const flyingParts: FlyingPart[] = [];
+
+function dropBulletCase() {
+  if (!viewWeapon) return;
+  const casing = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.018, 0.018, 0.12, 10),
+    new THREE.MeshStandardMaterial({ color: 0xd0a34a, metalness: 0.55, roughness: 0.35 }),
+  );
+  casing.rotation.z = Math.PI / 2;
+  casing.position.copy(viewWeapon.localToWorld(new THREE.Vector3(0.14, -0.02, -0.32)));
+  scene.add(casing);
+  flyingParts.push({
+    mesh: casing,
+    vel: new THREE.Vector3(1.4, 0.8, 0.35).applyQuaternion(camera.quaternion),
+    spin: new THREE.Vector3(9, 12, 6),
+    life: 1.2,
+  });
+}
+
+function dropMagazine() {
+  if (!viewWeapon) return;
+  const mag = new THREE.Mesh(
+    new THREE.BoxGeometry(0.11, 0.28, 0.14),
+    new THREE.MeshStandardMaterial({ color: 0x111416, roughness: 0.7 }),
+  );
+  mag.position.copy(viewWeapon.localToWorld(new THREE.Vector3(0, -0.2, -0.17)));
+  mag.quaternion.copy(viewWeapon.getWorldQuaternion(new THREE.Quaternion()));
+  scene.add(mag);
+  flyingParts.push({
+    mesh: mag,
+    vel: new THREE.Vector3(0.15, -0.1, -0.1).applyQuaternion(camera.quaternion),
+    spin: new THREE.Vector3(4, 2, 6),
+    life: 1.5,
+  });
+}
 
 function drawAttack(effect: AttackEffect) {
   const origin = new THREE.Vector3(effect.ox, effect.oy, effect.oz);
@@ -534,9 +757,7 @@ function drawAttack(effect: AttackEffect) {
         opacity: 1,
       }),
     );
-    flash.position
-      .copy(origin)
-      .add(new THREE.Vector3(effect.dx, effect.dy, effect.dz).multiplyScalar(0.65));
+    flash.position.copy(origin);
     scene.add(flash);
     timedObjects.push({ obj: flash, life: 0.08, maxLife: 0.08 });
   }
@@ -581,6 +802,27 @@ function updateTimedObjects(dt: number) {
     if (item.life <= 0) {
       scene.remove(item.obj);
       timedObjects.splice(i, 1);
+    }
+  }
+}
+
+function updateFlyingParts(dt: number) {
+  for (let i = flyingParts.length - 1; i >= 0; i--) {
+    const part = flyingParts[i];
+    part.life -= dt;
+    part.vel.y -= 5.5 * dt;
+    part.mesh.position.addScaledVector(part.vel, dt);
+    part.mesh.rotation.x += part.spin.x * dt;
+    part.mesh.rotation.y += part.spin.y * dt;
+    part.mesh.rotation.z += part.spin.z * dt;
+    if (part.mesh.position.y < 0.04) {
+      part.mesh.position.y = 0.04;
+      part.vel.multiplyScalar(0.35);
+      part.vel.y = Math.abs(part.vel.y) * 0.18;
+    }
+    if (part.life <= 0) {
+      scene.remove(part.mesh);
+      flyingParts.splice(i, 1);
     }
   }
 }
@@ -710,6 +952,7 @@ function tick() {
 
   updateWeaponAnimation(dt);
   updateTimedObjects(dt);
+  updateFlyingParts(dt);
   updateDamageMarkers(dt);
   if (hitXTimer > 0) {
     hitXTimer -= dt;

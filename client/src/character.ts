@@ -117,6 +117,7 @@ function makeGun(): THREE.Group {
   gun.add(grip);
 
   const mag = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.28, 0.14), gripMat);
+  mag.name = 'magazine';
   mag.position.set(0, -0.2, -0.17);
   mag.rotation.x = 0.08;
   gun.add(mag);

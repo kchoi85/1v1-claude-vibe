@@ -12,6 +12,7 @@ export type PlayerState = {
   maxHp: number;
   ammo: number;
   maxAmmo: number;
+  score: number;
 };
 
 export type PlayerClass = 'gi' | 'mage' | 'assassin';
@@ -51,6 +52,12 @@ export type DamageEvent = {
   z: number;
 };
 
+export type RoundOverEvent = {
+  winnerId: string;
+  loserId: string;
+  scores: { id: string; score: number }[];
+};
+
 export type ServerMessage =
   | { t: 'welcome'; id: string; players: PlayerState[] }
   | { t: 'state'; players: PlayerState[] }
@@ -58,6 +65,7 @@ export type ServerMessage =
   | { t: 'attack'; effect: AttackEffect }
   | { t: 'damage'; event: DamageEvent }
   | { t: 'reloaded'; ammo: number }
+  | { t: 'roundOver'; event: RoundOverEvent }
   | { t: 'leave'; id: string };
 
 export type ClientMessage =

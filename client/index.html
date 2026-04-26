@@ -169,6 +169,37 @@
         text-transform: uppercase;
         letter-spacing: 1px;
       }
+      #hp-panel {
+        position: absolute;
+        left: 50%;
+        bottom: 22px;
+        width: min(420px, calc(100vw - 220px));
+        transform: translateX(-50%);
+      }
+      #hp-panel .label-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        font-size: 12px;
+        opacity: 0.85;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      #hp-bar {
+        height: 18px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(0, 0, 0, 0.45);
+        border-radius: 6px;
+      }
+      #hp-fill {
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, #35d07f, #b9f36b);
+        transition:
+          width 120ms ease,
+          background 120ms ease;
+      }
       #damage-layer {
         position: absolute;
         inset: 0;
@@ -380,8 +411,15 @@
         <div id="player-list"></div>
       </div>
       <div id="damage-layer"></div>
+      <div id="hp-panel">
+        <div class="label-row">
+          <span>HP</span>
+          <span id="hp-text">100/100</span>
+        </div>
+        <div id="hp-bar"><div id="hp-fill"></div></div>
+      </div>
       <div id="ammo">
-        <span class="label">Ammo</span>
+        <span class="label" id="weapon-label">Ammo</span>
         <span id="ammo-count">--</span>
       </div>
     </div>

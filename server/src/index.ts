@@ -24,6 +24,8 @@ type Connected = {
   slot: number;
   lastAttackAt: number;
   reloadingUntil: number;
+  reloadTimer: ReturnType<typeof setTimeout> | null;
+  roundLocked: boolean;
 };
 
 const players = new Map<string, Connected>();
@@ -90,11 +92,14 @@ wss.on('connection', (ws) => {
       maxHp: 150,
       ammo: 30,
       maxAmmo: 30,
+      score: 0,
     },
     joined: false,
     slot: -1,
     lastAttackAt: 0,
     reloadingUntil: 0,
+    reloadTimer: null,
+    roundLocked: false,
   };
   players.set(id, conn);
   console.log(`[server] +${id} connected (${players.size}/2)`);
@@ -142,6 +147,7 @@ wss.on('connection', (ws) => {
       conn.joined = true;
       conn.lastAttackAt = 0;
       conn.reloadingUntil = 0;
+      conn.roundLocked = false;
       console.log(`[server] ${id} joined as "${name}" (${className}, slot ${slot})`);
       send(ws, { t: 'spawn', x: sp.x, z: sp.z, ry: sp.ry });
     } else if (msg.t === 'input') {
@@ -157,14 +163,7 @@ wss.on('connection', (ws) => {
       handleAttack(conn, msg);
     } else if (msg.t === 'reload') {
       if (!conn.joined || conn.state.className !== 'gi') return;
-      const stats = CLASS_STATS.gi;
-      conn.reloadingUntil = Date.now() + stats.reloadMs;
-      setTimeout(() => {
-        if (!players.has(conn.id) || conn.state.className !== 'gi') return;
-        conn.state.ammo = stats.maxAmmo;
-        conn.reloadingUntil = 0;
-        send(conn.ws, { t: 'reloaded', ammo: conn.state.ammo });
-      }, stats.reloadMs);
+      beginReload(conn);
     }
   });
 
@@ -204,6 +203,8 @@ function findFreeSlot(): number {
 function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack' }>) {
   const spec = ATTACKS[msg.kind];
   if (!spec || spec.className !== conn.state.className) return;
+  if (conn.roundLocked) return;
+  if (msg.kind === 'mage-charged' && msg.charge < 1) return;
 
   const now = Date.now();
   const classCooldown = CLASS_STATS[conn.state.className].cooldownMs;
@@ -213,10 +214,11 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   if (conn.state.className === 'gi') {
     if (conn.state.ammo <= 0) return;
     conn.state.ammo -= 1;
+    if (conn.state.ammo <= 0) beginReload(conn);
   }
   conn.lastAttackAt = now;
 
-  const origin = eyePoint(conn.state);
+  const origin = sanitizeOrigin(conn.state, { x: msg.ox, y: msg.oy, z: msg.oz });
   const dir = normalizeVector(
     msg.dx,
     msg.dy,
@@ -268,8 +270,46 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   });
 
   if (hit.target.state.hp <= 0) {
-    respawn(hit.target);
+    finishRound(conn, hit.target);
   }
+}
+
+function beginReload(conn: Connected) {
+  if (conn.reloadingUntil > Date.now() || conn.state.ammo >= conn.state.maxAmmo) return;
+  const stats = CLASS_STATS.gi;
+  conn.reloadingUntil = Date.now() + stats.reloadMs;
+  if (conn.reloadTimer) clearTimeout(conn.reloadTimer);
+  conn.reloadTimer = setTimeout(() => {
+    conn.reloadTimer = null;
+    if (!players.has(conn.id) || conn.state.className !== 'gi') return;
+    conn.state.ammo = stats.maxAmmo;
+    conn.reloadingUntil = 0;
+    send(conn.ws, { t: 'reloaded', ammo: conn.state.ammo });
+  }, stats.reloadMs);
+}
+
+function finishRound(winner: Connected, loser: Connected) {
+  if (winner.roundLocked || loser.roundLocked) return;
+  winner.roundLocked = true;
+  loser.roundLocked = true;
+  winner.state.score += 1;
+  broadcast({
+    t: 'roundOver',
+    event: {
+      winnerId: winner.id,
+      loserId: loser.id,
+      scores: [...players.values()]
+        .filter((p) => p.joined)
+        .map((p) => ({ id: p.id, score: p.state.score })),
+    },
+  });
+  setTimeout(() => {
+    for (const p of players.values()) {
+      if (!p.joined) continue;
+      respawn(p);
+      p.roundLocked = false;
+    }
+  }, 900);
 }
 
 function findHit(
@@ -320,6 +360,11 @@ function findHit(
 
 function respawn(conn: Connected) {
   const sp = SPAWNS[conn.slot >= 0 ? conn.slot : 0];
+  if (conn.reloadTimer) {
+    clearTimeout(conn.reloadTimer);
+    conn.reloadTimer = null;
+  }
+  conn.reloadingUntil = 0;
   conn.state.hp = conn.state.maxHp;
   conn.state.ammo = conn.state.maxAmmo;
   conn.state.px = sp.x;
@@ -339,6 +384,12 @@ type Vec3 = { x: number; y: number; z: number };
 
 function eyePoint(state: PlayerState): Vec3 {
   return { x: state.px, y: state.py + (state.crouch ? 1.0 : 1.65), z: state.pz };
+}
+
+function sanitizeOrigin(state: PlayerState, requested: Vec3): Vec3 {
+  const eye = eyePoint(state);
+  if (![requested.x, requested.y, requested.z].every(Number.isFinite)) return eye;
+  return length(sub(requested, eye)) <= 2.4 ? requested : eye;
 }
 
 function yawPitchDirection(ry: number, rx: number): Vec3 {
