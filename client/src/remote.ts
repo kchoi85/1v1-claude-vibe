@@ -11,6 +11,8 @@ type Remote = {
 
 const STAND_SCALE = 1;
 const CROUCH_SCALE = 0.65;
+const WEAPON_BASE_POS = new THREE.Vector3(0.46, 1.08, -0.28);
+const WEAPON_BASE_ROT = new THREE.Euler(0.08, -0.2, -0.12);
 
 export class RemotePlayers {
   private remotes = new Map<string, Remote>();
@@ -84,20 +86,45 @@ export class RemotePlayers {
       if (r.attackAnim) {
         r.attackAnim.time -= dt;
         const p = Math.max(0, r.attackAnim.time / 0.18);
+        const aimRot = weaponAimRotation(r.target.rx);
         if (r.attackAnim.kind === 'assassin-slash' || r.attackAnim.kind === 'assassin-charged') {
-          r.char.weapon.rotation.y = -0.7 * Math.sin((1 - p) * Math.PI);
-          r.char.weapon.rotation.z = -0.12 - 0.45 * Math.sin((1 - p) * Math.PI);
+          r.char.weapon.position.copy(WEAPON_BASE_POS);
+          r.char.weapon.rotation.set(
+            aimRot.x - 0.12,
+            aimRot.y - 0.7 * Math.sin((1 - p) * Math.PI),
+            aimRot.z - 0.45 * Math.sin((1 - p) * Math.PI),
+          );
         } else {
-          r.char.weapon.position.z = -0.28 + 0.14 * Math.sin((1 - p) * Math.PI);
+          r.char.weapon.position.set(
+            WEAPON_BASE_POS.x,
+            WEAPON_BASE_POS.y,
+            WEAPON_BASE_POS.z + 0.14 * Math.sin((1 - p) * Math.PI),
+          );
+          r.char.weapon.rotation.copy(aimRot);
         }
         if (r.attackAnim.time <= 0) {
           r.attackAnim = null;
-          r.char.weapon.position.set(0.46, 1.08, -0.28);
-          r.char.weapon.rotation.set(0.08, -0.2, -0.12);
         }
+      } else {
+        r.char.weapon.position.lerp(WEAPON_BASE_POS, a);
+        r.char.weapon.rotation.x +=
+          (weaponAimRotation(r.target.rx).x - r.char.weapon.rotation.x) * a;
+        r.char.weapon.rotation.y += (WEAPON_BASE_ROT.y - r.char.weapon.rotation.y) * a;
+        r.char.weapon.rotation.z += (WEAPON_BASE_ROT.z - r.char.weapon.rotation.z) * a;
       }
+
+      r.char.rightArm.rotation.x +=
+        (THREE.MathUtils.clamp(r.target.rx, -0.9, 0.9) - r.char.rightArm.rotation.x) * a;
     }
   }
+}
+
+function weaponAimRotation(pitch: number) {
+  return new THREE.Euler(
+    WEAPON_BASE_ROT.x + THREE.MathUtils.clamp(pitch, -1.05, 1.05),
+    WEAPON_BASE_ROT.y,
+    WEAPON_BASE_ROT.z,
+  );
 }
 
 function shortestAngle(from: number, to: number): number {

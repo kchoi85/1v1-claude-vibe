@@ -93,9 +93,42 @@ const gameplayKeyCodes = new Set([
   'ControlLeft',
   'ControlRight',
 ]);
+const gameplayKeyLockCodes = [...gameplayKeyCodes];
+
+type KeyboardLockNavigator = Navigator & {
+  keyboard?: {
+    lock?: (keyCodes?: string[]) => Promise<void>;
+    unlock?: () => void;
+  };
+};
 
 function shouldCaptureGameplayKey(e: KeyboardEvent) {
   return hasJoined && gameplayKeyCodes.has(e.code);
+}
+
+async function enterGameplayMode() {
+  await requestGameplayFullscreen();
+  await lockGameplayKeyboard();
+  controls.lock();
+}
+
+async function requestGameplayFullscreen() {
+  if (document.fullscreenElement || !app.requestFullscreen) return;
+  try {
+    await app.requestFullscreen({ navigationUI: 'hide' });
+  } catch {
+    // Fullscreen can be denied by the browser; pointer lock still works.
+  }
+}
+
+async function lockGameplayKeyboard() {
+  const keyboard = (navigator as KeyboardLockNavigator).keyboard;
+  if (!keyboard?.lock || !document.fullscreenElement) return;
+  try {
+    await keyboard.lock(gameplayKeyLockCodes);
+  } catch {
+    // Keyboard Lock is Chrome-only and requires fullscreen.
+  }
 }
 
 window.addEventListener(
@@ -141,6 +174,16 @@ window.addEventListener('keyup', (e) => {
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.sprint = false;
   if (e.code === 'Space') keys.jump = false;
   if (e.code === 'ControlLeft' || e.code === 'ControlRight') keys.crouch = false;
+});
+
+document.addEventListener('fullscreenchange', () => {
+  if (hasJoined && document.fullscreenElement) void lockGameplayKeyboard();
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (!hasJoined) return;
+  e.preventDefault();
+  e.returnValue = '';
 });
 
 window.addEventListener('resize', () => {
@@ -385,7 +428,7 @@ function attemptJoin() {
   nameForm.style.display = 'none';
   playText.style.display = 'block';
   overlayPanel.classList.add('clickable');
-  controls.lock();
+  void enterGameplayMode();
 }
 
 joinBtn.addEventListener('click', attemptJoin);
@@ -397,8 +440,8 @@ nameInput.addEventListener('input', () => {
   clearNameError(nameInput, nameErrorEl);
 });
 
-overlayPanel.addEventListener('click', () => {
-  if (hasJoined) controls.lock();
+overlay.addEventListener('click', () => {
+  if (hasJoined) void enterGameplayMode();
 });
 
 network.connect('ws://localhost:8080');
