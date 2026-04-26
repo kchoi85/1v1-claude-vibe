@@ -124,10 +124,10 @@ function addGeneratedCover(scene: THREE.Group, boxes: THREE.Box3[], seed: number
       continue;
     }
 
-    const kind = 'crate';
+    const kind: CoverKind = 'crate';
     const x = snap(rng() * 26 - 11, 1.5);
     const z = snap(3.5 + rng() * 10, 1.5);
-    const rot = rng() > 0.5 ? Math.PI / 2 : 0;
+    const rot = 0;
     const color = palette[Math.floor(rng() * palette.length)];
     const spec = { kind, x, z, rot, color };
     if (isCoverClear(spec, specs)) specs.push(spec);
@@ -168,7 +168,8 @@ function coverSize(spec: CoverSpec) {
   const turned = Math.abs(Math.sin(spec.rot)) > 0.5;
   if (spec.kind === 'van')
     return turned ? { w: 1.8, d: 3.35, h: 2.15 } : { w: 3.35, d: 1.8, h: 2.15 };
-  if (spec.kind === 'crate') return turned ? { w: 1.25, d: 2.1, h: 2.05 } : { w: 2.1, d: 1.25, h: 2.05 };
+  if (spec.kind === 'crate')
+    return turned ? { w: 1.25, d: 2.1, h: 2.05 } : { w: 2.1, d: 1.25, h: 2.05 };
   return turned ? { w: 0.95, d: 4.1, h: 2.25 } : { w: 4.1, d: 0.95, h: 2.25 };
 }
 

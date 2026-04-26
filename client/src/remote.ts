@@ -17,6 +17,12 @@ type Remote = {
   attackAnim: { kind: AttackKind; time: number } | null;
 };
 
+type HitMark = {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+};
+
 const STAND_SCALE = 1;
 const CROUCH_SCALE = 0.65;
 const WEAPON_BASE_POS = new THREE.Vector3(0.46, 1.08, -0.28);
@@ -24,6 +30,7 @@ const WEAPON_BASE_ROT = new THREE.Euler(0.08, -0.2, -0.12);
 
 export class RemotePlayers {
   private remotes = new Map<string, Remote>();
+  private hitMarks: HitMark[] = [];
 
   constructor(private scene: THREE.Scene) {}
 
@@ -142,25 +149,37 @@ export class RemotePlayers {
     const local = r.char.group.worldToLocal(worldPoint.clone());
     const mark = new THREE.Mesh(
       new THREE.SphereGeometry(headshot ? 0.085 : 0.065, 10, 8),
-      new THREE.MeshBasicMaterial({ color: headshot ? 0xff1111 : 0x8b0000 }),
+      new THREE.MeshBasicMaterial({
+        color: headshot ? 0xff1111 : 0x8b0000,
+        transparent: true,
+        opacity: 0.9,
+      }),
     );
     mark.position.copy(local);
     r.char.group.add(mark);
+    this.hitMarks.push({ mesh: mark, life: 5, maxLife: 5 });
+  }
+
+  updateHitMarks(dt: number) {
+    for (let i = this.hitMarks.length - 1; i >= 0; i--) {
+      const mark = this.hitMarks[i];
+      mark.life -= dt;
+      const opacity = Math.max(0, mark.life / mark.maxLife);
+      if (mark.mesh.material instanceof THREE.MeshBasicMaterial) {
+        mark.mesh.material.opacity = opacity * 0.9;
+      }
+      if (mark.life <= 0) {
+        mark.mesh.parent?.remove(mark.mesh);
+        this.hitMarks.splice(i, 1);
+      }
+    }
   }
 
   clearHitMarks() {
-    for (const r of this.remotes.values()) {
-      const remove: THREE.Object3D[] = [];
-      r.char.group.traverse((obj) => {
-        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshBasicMaterial) {
-          const color = obj.material.color.getHex();
-          if (color === 0xff1111 || color === 0x8b0000) remove.push(obj);
-        }
-      });
-      for (const obj of remove) {
-        obj.parent?.remove(obj);
-      }
+    for (const mark of this.hitMarks) {
+      mark.mesh.parent?.remove(mark.mesh);
     }
+    this.hitMarks.length = 0;
   }
 }
 

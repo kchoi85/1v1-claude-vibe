@@ -91,7 +91,6 @@ export const sounds = {
 export function playAttackSound(kind: AttackKind) {
   if (kind === 'gi-shot') {
     sounds.giShot();
-    sounds.caseDrop();
   } else if (kind === 'mage-shot' || kind === 'mage-charged') {
     sounds.magic(kind === 'mage-charged');
   } else {

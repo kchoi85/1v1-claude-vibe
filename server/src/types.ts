@@ -67,17 +67,19 @@ export type RoundOverEvent = {
 };
 
 export type ServerMessage =
-  | { t: 'welcome'; id: string; players: PlayerState[]; mapSeed: number }
+  | { t: 'welcome'; id: string; players: PlayerState[]; mapSeed: number; sessionId: string }
   | { t: 'state'; players: PlayerState[] }
   | { t: 'spawn'; x: number; z: number; ry: number }
   | { t: 'attack'; effect: AttackEffect }
   | { t: 'damage'; event: DamageEvent }
   | { t: 'reloaded'; ammo: number }
   | { t: 'roundOver'; event: RoundOverEvent }
+  | { t: 'peerJoined'; name: string }
+  | { t: 'peerLeft'; name: string }
   | { t: 'leave'; id: string };
 
 export type ClientMessage =
-  | { t: 'join'; name: string; className: PlayerClass }
+  | { t: 'join'; name: string; className: PlayerClass; sessionId: string }
   | {
       t: 'input';
       px: number;

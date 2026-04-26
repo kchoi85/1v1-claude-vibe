@@ -553,6 +553,7 @@ function beginPrimary() {
     input.fireHeld = true;
     fireAttack('gi-shot');
   } else if (localStats.className === 'mage') {
+    input.fireHeld = true;
     fireAttack('mage-shot');
   } else {
     input.fireHeld = true;
@@ -588,7 +589,6 @@ function reloadWeapon() {
   localStats.reloading = true;
   input.fireHeld = false;
   input.reloadAnim = 1.25;
-  sounds.reload();
   dropMagazine();
   renderAmmo();
   network.sendReload();
@@ -880,12 +880,15 @@ function drawAttack(effect: AttackEffect) {
     addMagicTrail(origin, end, effect.kind === 'mage-charged');
   }
 
-  if (effect.kind === 'gi-shot' && (effect.hit || effect.blocked)) {
-    addBulletHole(end, new THREE.Vector3(effect.dx, effect.dy, effect.dz).normalize());
+  if (
+    (effect.kind === 'gi-shot' || ATTACK_CONFIG[effect.kind].projectile) &&
+    (effect.hit || effect.blocked)
+  ) {
+    const dir = new THREE.Vector3(effect.dx, effect.dy, effect.dz).normalize();
+    if (effect.kind === 'gi-shot') addBulletHole(end, dir);
+    else addMagicImpact(end, dir, effect.kind === 'mage-charged');
   }
 }
-
-const persistentEffects: THREE.Object3D[] = [];
 
 function addBulletHole(point: THREE.Vector3, dir: THREE.Vector3) {
   const hole = new THREE.Mesh(
@@ -897,10 +900,48 @@ function addBulletHole(point: THREE.Vector3, dir: THREE.Vector3) {
       side: THREE.DoubleSide,
     }),
   );
-  hole.position.copy(point).addScaledVector(dir, -0.012);
-  hole.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().negate());
+  placeImpactDecal(hole, point, dir, 0.012);
   scene.add(hole);
-  persistentEffects.push(hole);
+  timedObjects.push({ obj: hole, life: 5, maxLife: 5 });
+}
+
+function addMagicImpact(point: THREE.Vector3, dir: THREE.Vector3, charged: boolean) {
+  const impact = new THREE.Group();
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(charged ? 0.07 : 0.045, charged ? 0.16 : 0.11, 18),
+    new THREE.MeshBasicMaterial({
+      color: charged ? 0xff8df5 : 0x8df5ff,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    }),
+  );
+  const dot = new THREE.Mesh(
+    new THREE.CircleGeometry(charged ? 0.035 : 0.025, 12),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+    }),
+  );
+  impact.add(ring, dot);
+  placeImpactDecal(impact, point, dir, 0.014);
+  scene.add(impact);
+  timedObjects.push({ obj: impact, life: 4, maxLife: 4 });
+}
+
+function placeImpactDecal(
+  obj: THREE.Object3D,
+  point: THREE.Vector3,
+  dir: THREE.Vector3,
+  inset: number,
+) {
+  const isGround = point.y <= 0.04 && dir.y < -0.2;
+  const normal = isGround ? UP.clone() : dir.clone().negate();
+  obj.position.copy(point).addScaledVector(normal, inset);
+  if (isGround) obj.position.y = Math.max(obj.position.y, 0.025);
+  obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal.normalize());
 }
 
 function addHitEffects(event: DamageEvent) {
@@ -920,8 +961,6 @@ function addHitEffects(event: DamageEvent) {
 }
 
 function clearPersistentHitEffects() {
-  for (const obj of persistentEffects) scene.remove(obj);
-  persistentEffects.length = 0;
   remotes.clearHitMarks();
 }
 
@@ -1134,6 +1173,7 @@ function tick() {
   input.giHeat = Math.max(0, input.giHeat - dt * 0.75);
   if (input.fireHeld && controls.isLocked) {
     if (localStats.className === 'gi') fireAttack('gi-shot');
+    if (localStats.className === 'mage') fireAttack('mage-shot');
     if (localStats.className === 'assassin') fireAttack('assassin-slash');
   }
 
@@ -1146,6 +1186,7 @@ function tick() {
   updateTimedObjects(dt);
   updateFlyingParts(dt);
   updateDamageMarkers(dt);
+  remotes.updateHitMarks(dt);
   if (hitXTimer > 0) {
     hitXTimer -= dt;
     if (hitXTimer <= 0) hitXEl.classList.remove('show');
