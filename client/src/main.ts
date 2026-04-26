@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { buildArena } from './arena.js';
 import { ensureAudio, playAttackSound, sounds } from './audio.js';
 import { makeWeapon } from './character.js';
 import { ATTACK_CONFIG, CLASS_MAX_HP, CLASS_MOVE, GI_GUN } from './gameConfig.js';
@@ -55,42 +56,14 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 app.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 0.6));
+scene.add(new THREE.HemisphereLight(0xfff7df, 0x6f8fa0, 0.72));
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(10, 20, 5);
 sun.castShadow = true;
 scene.add(sun);
 
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(60, 60),
-  new THREE.MeshStandardMaterial({ color: 0x556677 }),
-);
-floor.rotation.x = -Math.PI / 2;
-floor.receiveShadow = true;
-scene.add(floor);
-
-const wallMat = new THREE.MeshStandardMaterial({ color: 0x334455 });
-const wallBoxes: THREE.Box3[] = [];
-function addWall(x: number, z: number, w: number, d: number, h = 3) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-  m.position.set(x, h / 2, z);
-  m.castShadow = true;
-  m.receiveShadow = true;
-  scene.add(m);
-  wallBoxes.push(
-    new THREE.Box3(
-      new THREE.Vector3(x - w / 2, 0, z - d / 2),
-      new THREE.Vector3(x + w / 2, h, z + d / 2),
-    ),
-  );
-}
-addWall(0, -30, 60, 1);
-addWall(0, 30, 60, 1);
-addWall(-30, 0, 1, 60);
-addWall(30, 0, 1, 60);
-addWall(-6, -8, 4, 4);
-addWall(8, 4, 6, 2);
-addWall(-12, 10, 2, 8);
+const arena = buildArena(scene);
+const wallBoxes = arena.collisionBoxes;
 
 const controls = new PointerLockControls(camera, renderer.domElement);
 scene.add(controls.getObject());
@@ -868,8 +841,16 @@ function tick() {
     const eyeAlpha = 1 - Math.exp(-dt * 14);
     player.eye += (targetEye - player.eye) * eyeAlpha;
 
-    obj.position.x = THREE.MathUtils.clamp(player.pos.x, -29.5, 29.5);
-    obj.position.z = THREE.MathUtils.clamp(player.pos.z, -29.5, 29.5);
+    obj.position.x = THREE.MathUtils.clamp(
+      player.pos.x,
+      arena.bounds.minX + PLAYER_RADIUS,
+      arena.bounds.maxX - PLAYER_RADIUS,
+    );
+    obj.position.z = THREE.MathUtils.clamp(
+      player.pos.z,
+      arena.bounds.minZ + PLAYER_RADIUS,
+      arena.bounds.maxZ - PLAYER_RADIUS,
+    );
     player.pos.x = obj.position.x;
     player.pos.z = obj.position.z;
     obj.position.y = player.pos.y + player.eye;

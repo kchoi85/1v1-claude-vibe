@@ -12,8 +12,8 @@ const PORT = Number(process.env.PORT ?? 8080);
 const TICK_MS = 50;
 
 const SPAWNS = [
-  { x: 0, z: -25, ry: Math.PI }, // north spawn, facing south
-  { x: 0, z: 25, ry: 0 }, // south spawn, facing north
+  { x: 0, z: -15, ry: Math.PI }, // north spawn, facing south
+  { x: 0, z: 15, ry: 0 }, // south spawn, facing north
 ];
 
 type Connected = {
