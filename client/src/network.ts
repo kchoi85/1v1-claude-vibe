@@ -71,7 +71,13 @@ export class Network {
     this.send({ t: 'input', px, py, pz, ry, rx, crouch });
   }
 
-  sendAttack(kind: AttackKind, origin: VecLike, direction: VecLike, charge = 0) {
+  sendAttack(
+    kind: AttackKind,
+    origin: VecLike,
+    direction: VecLike,
+    charge = 0,
+    visualOrigin: VecLike = origin,
+  ) {
     this.send({
       t: 'attack',
       kind,
@@ -81,6 +87,9 @@ export class Network {
       dx: direction.x,
       dy: direction.y,
       dz: direction.z,
+      vox: visualOrigin.x,
+      voy: visualOrigin.y,
+      voz: visualOrigin.z,
       charge,
     });
   }

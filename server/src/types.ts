@@ -88,6 +88,9 @@ export type ClientMessage =
       dx: number;
       dy: number;
       dz: number;
+      vox: number;
+      voy: number;
+      voz: number;
       charge: number;
     }
   | { t: 'reload' };

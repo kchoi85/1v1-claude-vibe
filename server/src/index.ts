@@ -52,15 +52,15 @@ const ATTACKS: Record<
     melee?: boolean;
   }
 > = {
-  'gi-shot': { className: 'gi', damage: 10, range: 80, radius: 0.45 },
-  'mage-shot': { className: 'mage', damage: 30, range: 55, radius: 0.75 },
-  'mage-charged': { className: 'mage', damage: 60, range: 60, radius: 1.05, cooldownMs: 1100 },
-  'assassin-slash': { className: 'assassin', damage: 25, range: 2.25, radius: 1.0, melee: true },
+  'gi-shot': { className: 'gi', damage: 10, range: 80, radius: 0.04 },
+  'mage-shot': { className: 'mage', damage: 30, range: 55, radius: 0.14 },
+  'mage-charged': { className: 'mage', damage: 60, range: 60, radius: 0.24, cooldownMs: 1100 },
+  'assassin-slash': { className: 'assassin', damage: 25, range: 2.25, radius: 0.25, melee: true },
   'assassin-charged': {
     className: 'assassin',
     damage: 55,
     range: 3.0,
-    radius: 1.2,
+    radius: 0.35,
     cooldownMs: 850,
     melee: true,
   },
@@ -218,20 +218,25 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   }
   conn.lastAttackAt = now;
 
-  const origin = sanitizeOrigin(conn.state, { x: msg.ox, y: msg.oy, z: msg.oz });
+  const rayOrigin = sanitizeOrigin(conn.state, { x: msg.ox, y: msg.oy, z: msg.oz });
+  const visualOrigin = sanitizeVisualOrigin(
+    conn.state,
+    { x: msg.vox, y: msg.voy, z: msg.voz },
+    rayOrigin,
+  );
   const dir = normalizeVector(
     msg.dx,
     msg.dy,
     msg.dz,
     yawPitchDirection(conn.state.ry, conn.state.rx),
   );
-  const hit = findHit(conn, origin, dir, spec);
+  const hit = findHit(conn, rayOrigin, dir, spec);
   const endpoint = hit
     ? hit.point
     : {
-        x: origin.x + dir.x * spec.range,
-        y: origin.y + dir.y * spec.range,
-        z: origin.z + dir.z * spec.range,
+        x: visualOrigin.x + dir.x * spec.range,
+        y: visualOrigin.y + dir.y * spec.range,
+        z: visualOrigin.z + dir.z * spec.range,
       };
 
   const effect: AttackEffect = {
@@ -239,9 +244,9 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
     attackerId: conn.id,
     className: conn.state.className,
     kind: msg.kind,
-    ox: origin.x,
-    oy: origin.y,
-    oz: origin.z,
+    ox: visualOrigin.x,
+    oy: visualOrigin.y,
+    oz: visualOrigin.z,
     dx: dir.x,
     dy: dir.y,
     dz: dir.z,
@@ -253,14 +258,15 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   broadcast({ t: 'attack', effect });
 
   if (!hit) return;
-  hit.target.state.hp = Math.max(0, hit.target.state.hp - spec.damage);
+  const damage = damageForHit(spec, hit);
+  hit.target.state.hp = Math.max(0, hit.target.state.hp - damage);
   broadcast({
     t: 'damage',
     event: {
       id: String(nextEventId++),
       attackerId: conn.id,
       targetId: hit.target.id,
-      amount: spec.damage,
+      amount: damage,
       hp: hit.target.state.hp,
       maxHp: hit.target.state.maxHp,
       x: hit.target.state.px,
@@ -317,45 +323,39 @@ function findHit(
   origin: Vec3,
   dir: Vec3,
   spec: (typeof ATTACKS)[AttackKind],
-): { target: Connected; point: Vec3; dist: number } | null {
-  let best: { target: Connected; point: Vec3; dist: number } | null = null;
+): HitResult | null {
+  let best: HitResult | null = null;
   for (const target of players.values()) {
     if (!target.joined || target.id === attacker.id) continue;
-    const center = {
+    const roughCenter = {
       x: target.state.px,
       y: target.state.py + (target.state.crouch ? 0.8 : 1.05),
       z: target.state.pz,
     };
-    const toTarget = sub(center, origin);
-    const distToCenter = length(toTarget);
-    if (distToCenter > spec.range + spec.radius) continue;
+    const roughDist = length(sub(roughCenter, origin));
+    if (roughDist > spec.range + 2) continue;
 
-    if (spec.melee) {
-      const facing = dot(normalize(toTarget), dir);
-      if (distToCenter <= spec.range && facing > 0.45) {
-        const point = {
-          x: origin.x + dir.x * Math.min(distToCenter, spec.range),
-          y: origin.y + dir.y * Math.min(distToCenter, spec.range),
-          z: origin.z + dir.z * Math.min(distToCenter, spec.range),
-        };
-        best = chooseCloser(best, { target, point, dist: distToCenter });
-      }
-      continue;
-    }
+    if (spec.melee && dot(normalize(sub(roughCenter, origin)), dir) < 0.35) continue;
 
-    const along = dot(toTarget, dir);
-    if (along < 0 || along > spec.range) continue;
-    const closest = {
-      x: origin.x + dir.x * along,
-      y: origin.y + dir.y * along,
-      z: origin.z + dir.z * along,
-    };
-    const miss = length(sub(center, closest));
-    if (miss <= spec.radius) {
-      best = chooseCloser(best, { target, point: closest, dist: along });
+    for (const capsule of playerHitCapsules(target.state)) {
+      const hit = rayCapsuleHit(origin, dir, capsule, spec.radius, spec.range);
+      if (!hit) continue;
+      best = chooseCloser(best, {
+        target,
+        point: hit.point,
+        dist: hit.dist,
+        part: capsule.part,
+      });
     }
   }
   return best;
+}
+
+function damageForHit(spec: (typeof ATTACKS)[AttackKind], hit: HitResult): number {
+  if (hit.part === 'head') return hit.target.state.hp;
+  if (spec.className !== 'gi') return spec.damage;
+  if (hit.part === 'torso') return spec.damage;
+  return Math.max(1, Math.round(spec.damage * 0.5));
 }
 
 function respawn(conn: Connected) {
@@ -381,6 +381,161 @@ function normalizeClass(value: unknown): PlayerClass {
 }
 
 type Vec3 = { x: number; y: number; z: number };
+type HitPart = 'head' | 'torso' | 'arm' | 'leg';
+type HitCapsule = { part: HitPart; a: Vec3; b: Vec3; radius: number };
+type HitResult = { target: Connected; point: Vec3; dist: number; part: HitPart };
+
+function playerHitCapsules(state: PlayerState): HitCapsule[] {
+  const crouchScale = state.crouch ? 0.65 : 1;
+  const capsules: HitCapsule[] = [
+    capsuleFromLocal(
+      state,
+      crouchScale,
+      'head',
+      { x: 0, y: 1.58, z: 0 },
+      { x: 0, y: 1.82, z: 0 },
+      0.23,
+    ),
+    capsuleFromLocal(
+      state,
+      crouchScale,
+      'torso',
+      { x: 0, y: 0.72, z: 0 },
+      { x: 0, y: 1.25, z: 0 },
+      0.31,
+    ),
+    capsuleFromLocal(
+      state,
+      crouchScale,
+      'arm',
+      { x: -0.42, y: 0.9, z: 0 },
+      { x: -0.42, y: 1.4, z: 0 },
+      0.11,
+    ),
+    capsuleFromLocal(
+      state,
+      crouchScale,
+      'arm',
+      { x: 0.42, y: 0.9, z: 0 },
+      { x: 0.42, y: 1.4, z: 0 },
+      0.11,
+    ),
+    capsuleFromLocal(
+      state,
+      crouchScale,
+      'leg',
+      { x: -0.17, y: 0.12, z: 0 },
+      { x: -0.17, y: 0.7, z: 0 },
+      0.14,
+    ),
+    capsuleFromLocal(
+      state,
+      crouchScale,
+      'leg',
+      { x: 0.17, y: 0.12, z: 0 },
+      { x: 0.17, y: 0.7, z: 0 },
+      0.14,
+    ),
+  ];
+  return capsules;
+}
+
+function capsuleFromLocal(
+  state: PlayerState,
+  yScale: number,
+  part: HitPart,
+  a: Vec3,
+  b: Vec3,
+  radius: number,
+): HitCapsule {
+  return {
+    part,
+    a: localToPlayerWorld(state, { x: a.x, y: a.y * yScale, z: a.z }),
+    b: localToPlayerWorld(state, { x: b.x, y: b.y * yScale, z: b.z }),
+    radius,
+  };
+}
+
+function localToPlayerWorld(state: PlayerState, p: Vec3): Vec3 {
+  const cos = Math.cos(state.ry);
+  const sin = Math.sin(state.ry);
+  return {
+    x: state.px + p.x * cos + p.z * sin,
+    y: state.py + p.y,
+    z: state.pz - p.x * sin + p.z * cos,
+  };
+}
+
+function rayCapsuleHit(
+  origin: Vec3,
+  dir: Vec3,
+  capsule: HitCapsule,
+  extraRadius: number,
+  maxRange: number,
+): { point: Vec3; dist: number } | null {
+  const closest = closestRaySegment(origin, dir, capsule.a, capsule.b);
+  if (closest.rayT < 0 || closest.rayT > maxRange) return null;
+  const hitRadius = capsule.radius + extraRadius;
+  if (length(sub(closest.rayPoint, closest.segmentPoint)) > hitRadius) return null;
+
+  const entryDist = Math.max(0, closest.rayT - hitRadius);
+  return {
+    point: {
+      x: origin.x + dir.x * entryDist,
+      y: origin.y + dir.y * entryDist,
+      z: origin.z + dir.z * entryDist,
+    },
+    dist: entryDist,
+  };
+}
+
+function closestRaySegment(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3) {
+  const seg = sub(b, a);
+  const segLenSq = dot(seg, seg);
+  if (segLenSq < 0.000001) {
+    const rayT = Math.max(0, dot(sub(a, origin), dir));
+    return {
+      rayT,
+      rayPoint: add(origin, scale(dir, rayT)),
+      segmentPoint: a,
+    };
+  }
+
+  const w0 = sub(origin, a);
+  const raySeg = dot(dir, seg);
+  const segSeg = segLenSq;
+  const rayW = dot(dir, w0);
+  const segW = dot(seg, w0);
+  const denom = segSeg - raySeg * raySeg;
+
+  let rayT = 0;
+  let segT = 0;
+  if (Math.abs(denom) > 0.000001) {
+    rayT = (raySeg * segW - segSeg * rayW) / denom;
+    segT = (segW + raySeg * rayT) / segSeg;
+  } else {
+    segT = segW / segSeg;
+  }
+
+  if (segT < 0) {
+    segT = 0;
+    rayT = dot(sub(a, origin), dir);
+  } else if (segT > 1) {
+    segT = 1;
+    rayT = dot(sub(b, origin), dir);
+  }
+
+  if (rayT < 0) {
+    rayT = 0;
+    segT = clamp(dot(sub(origin, a), seg) / segSeg, 0, 1);
+  }
+
+  return {
+    rayT,
+    rayPoint: add(origin, scale(dir, rayT)),
+    segmentPoint: add(a, scale(seg, segT)),
+  };
+}
 
 function eyePoint(state: PlayerState): Vec3 {
   return { x: state.px, y: state.py + (state.crouch ? 1.0 : 1.65), z: state.pz };
@@ -390,6 +545,12 @@ function sanitizeOrigin(state: PlayerState, requested: Vec3): Vec3 {
   const eye = eyePoint(state);
   if (![requested.x, requested.y, requested.z].every(Number.isFinite)) return eye;
   return length(sub(requested, eye)) <= 2.4 ? requested : eye;
+}
+
+function sanitizeVisualOrigin(state: PlayerState, requested: Vec3, fallback: Vec3): Vec3 {
+  const eye = eyePoint(state);
+  if (![requested.x, requested.y, requested.z].every(Number.isFinite)) return fallback;
+  return length(sub(requested, eye)) <= 3 ? requested : fallback;
 }
 
 function yawPitchDirection(ry: number, rx: number): Vec3 {
@@ -418,8 +579,20 @@ function sub(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
 }
 
+function add(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function scale(v: Vec3, s: number): Vec3 {
+  return { x: v.x * s, y: v.y * s, z: v.z * s };
+}
+
 function dot(a: Vec3, b: Vec3): number {
   return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function chooseCloser<T extends { dist: number }>(current: T | null, next: T): T {

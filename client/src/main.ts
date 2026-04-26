@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { ensureAudio, playAttackSound, sounds } from './audio.js';
 import { makeWeapon } from './character.js';
+import { ATTACK_CONFIG, CLASS_LABELS, CLASS_MAX_HP, CLASS_MOVE } from './gameConfig.js';
 import { Network } from './network.js';
 import { RemotePlayers } from './remote.js';
 import type { AttackEffect, AttackKind, DamageEvent, PlayerClass, PlayerState } from './types.js';
@@ -11,6 +13,7 @@ const overlayPanel = document.getElementById('overlay-panel')!;
 const nameForm = document.getElementById('name-form')!;
 const playText = document.getElementById('play-text')!;
 const nameInput = document.getElementById('name-input') as HTMLInputElement;
+const nameErrorEl = document.getElementById('name-error')!;
 const joinBtn = document.getElementById('join-btn') as HTMLButtonElement;
 const statusEl = document.getElementById('status')!;
 const scoreMeEl = document.getElementById('score-me')!;
@@ -24,113 +27,12 @@ const hitXEl = document.getElementById('hit-x')!;
 const damageLayer = document.getElementById('damage-layer')!;
 const classCards = Array.from(document.querySelectorAll<HTMLButtonElement>('.class-card'));
 
-const CLASS_LABELS: Record<PlayerClass, string> = {
-  gi: 'G.I.',
-  mage: 'Mage',
-  assassin: 'Assassin',
-};
-
-const CLASS_MOVE: Record<PlayerClass, { walk: number; sprint: number }> = {
-  gi: { walk: 6, sprint: 1.6 },
-  mage: { walk: 6, sprint: 1.6 },
-  assassin: { walk: 8.2, sprint: 2.25 },
-};
-
-const CLASS_MAX_HP: Record<PlayerClass, number> = {
-  gi: 150,
-  mage: 100,
-  assassin: 100,
-};
-
-const ATTACK_CONFIG: Record<
-  AttackKind,
-  { color: number; cooldown: number; localAmmo?: boolean; flash?: number; projectile?: boolean }
-> = {
-  'gi-shot': { color: 0xffd45c, cooldown: 85, localAmmo: true, flash: 0xfff0a0 },
-  'mage-shot': { color: 0x8df5ff, cooldown: 650, projectile: true, flash: 0x80f6ff },
-  'mage-charged': { color: 0xff8df5, cooldown: 1100, projectile: true, flash: 0xffb3fb },
-  'assassin-slash': { color: 0xe8f6ff, cooldown: 420 },
-  'assassin-charged': { color: 0xff4f72, cooldown: 850 },
-};
-
 const score = { me: 0, opp: 0 };
 function renderScore() {
   scoreMeEl.textContent = String(score.me);
   scoreOppEl.textContent = String(score.opp);
 }
 renderScore();
-
-let audioCtx: AudioContext | null = null;
-function audio(): AudioContext | null {
-  const AudioContextCtor =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextCtor) return null;
-  audioCtx ??= new AudioContextCtor();
-  if (audioCtx.state === 'suspended') void audioCtx.resume();
-  return audioCtx;
-}
-
-function tone(freq: number, duration: number, type: OscillatorType, gain = 0.08, delay = 0) {
-  const ctx = audio();
-  if (!ctx) return;
-  const osc = ctx.createOscillator();
-  const vol = ctx.createGain();
-  const start = ctx.currentTime + delay;
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, start);
-  vol.gain.setValueAtTime(gain, start);
-  vol.gain.exponentialRampToValueAtTime(0.001, start + duration);
-  osc.connect(vol).connect(ctx.destination);
-  osc.start(start);
-  osc.stop(start + duration);
-}
-
-function noise(duration: number, gain = 0.05, delay = 0) {
-  const ctx = audio();
-  if (!ctx) return;
-  const samples = Math.max(1, Math.floor(ctx.sampleRate * duration));
-  const buffer = ctx.createBuffer(1, samples, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < samples; i++) data[i] = Math.random() * 2 - 1;
-  const source = ctx.createBufferSource();
-  const vol = ctx.createGain();
-  const start = ctx.currentTime + delay;
-  source.buffer = buffer;
-  vol.gain.setValueAtTime(gain, start);
-  vol.gain.exponentialRampToValueAtTime(0.001, start + duration);
-  source.connect(vol).connect(ctx.destination);
-  source.start(start);
-  source.stop(start + duration);
-}
-
-const sounds = {
-  giShot() {
-    noise(0.045, 0.08);
-    tone(95, 0.055, 'square', 0.045);
-  },
-  caseDrop() {
-    tone(980, 0.035, 'triangle', 0.025, 0.16);
-    tone(1320, 0.025, 'triangle', 0.018, 0.22);
-  },
-  reload() {
-    tone(280, 0.08, 'sawtooth', 0.045);
-    tone(460, 0.06, 'triangle', 0.035, 0.42);
-    tone(210, 0.08, 'square', 0.035, 0.86);
-  },
-  magic(charged = false) {
-    tone(charged ? 330 : 520, charged ? 0.22 : 0.12, 'sine', 0.055);
-    tone(charged ? 880 : 760, charged ? 0.28 : 0.16, 'triangle', 0.04, 0.02);
-  },
-  slash() {
-    noise(0.09, 0.045);
-    tone(620, 0.07, 'sawtooth', 0.035);
-  },
-  ding() {
-    tone(784, 0.16, 'sine', 0.08);
-    tone(1175, 0.22, 'sine', 0.06, 0.08);
-  },
-};
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x202830);
@@ -474,9 +376,17 @@ function renderHp() {
 joinBtn.disabled = true;
 
 function attemptJoin() {
-  audio();
   const raw = nameInput.value.trim().slice(0, 16);
-  myName = raw.length > 0 ? raw : `Player`;
+  if (!raw) {
+    nameErrorEl.textContent = 'Name is required';
+    nameInput.setAttribute('aria-invalid', 'true');
+    nameInput.focus();
+    return;
+  }
+  ensureAudio();
+  nameErrorEl.textContent = '';
+  nameInput.removeAttribute('aria-invalid');
+  myName = raw;
   if (!network.ws || network.ws.readyState !== WebSocket.OPEN) return;
   localStats.className = selectedClass;
   setViewWeapon(selectedClass);
@@ -491,6 +401,11 @@ function attemptJoin() {
 joinBtn.addEventListener('click', attemptJoin);
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') attemptJoin();
+});
+nameInput.addEventListener('input', () => {
+  if (!nameInput.value.trim()) return;
+  nameErrorEl.textContent = '';
+  nameInput.removeAttribute('aria-invalid');
 });
 
 overlayPanel.addEventListener('click', () => {
@@ -564,10 +479,12 @@ function fireAttack(kind: AttackKind, charge = 0) {
     sounds.slash();
   }
 
-  const origin = getWeaponTipWorld();
+  const origin = new THREE.Vector3();
+  const visualOrigin = getWeaponTipWorld();
   const direction = new THREE.Vector3();
+  camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
-  network.sendAttack(kind, origin, direction, charge);
+  network.sendAttack(kind, origin, direction, charge, visualOrigin);
 }
 
 function getWeaponTipWorld(): THREE.Vector3 {
@@ -578,17 +495,6 @@ function getWeaponTipWorld(): THREE.Vector3 {
     assassin: new THREE.Vector3(0, 0, -0.66),
   };
   return viewWeapon.localToWorld(tipByClass[localStats.className].clone());
-}
-
-function playAttackSound(kind: AttackKind) {
-  if (kind === 'gi-shot') {
-    sounds.giShot();
-    sounds.caseDrop();
-  } else if (kind === 'mage-shot' || kind === 'mage-charged') {
-    sounds.magic(kind === 'mage-charged');
-  } else {
-    sounds.slash();
-  }
 }
 
 function playLocalAttack(kind: AttackKind) {

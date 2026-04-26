@@ -265,6 +265,16 @@
         outline: none;
         border-color: #6cf;
       }
+      #overlay input[aria-invalid='true'] {
+        border-color: #ff6b6b;
+      }
+      #name-error {
+        min-height: 18px;
+        margin: -8px 0 8px;
+        color: #ff8a8a;
+        font-size: 12px;
+        text-align: left;
+      }
       #class-select {
         display: flex;
         justify-content: center;
@@ -429,6 +439,7 @@
           <h1>FPS 1v1</h1>
           <div>Enter your name</div>
           <input id="name-input" maxlength="16" autocomplete="off" placeholder="Player" />
+          <div id="name-error" role="alert"></div>
           <div id="class-select" aria-label="Choose class">
             <button class="class-card selected" type="button" data-class="gi" title="G.I.">
               <span class="class-icon gi"></span>
