@@ -173,6 +173,7 @@ const input = {
   charging: false,
   chargeStart: 0,
   nextAttackAt: 0,
+  lastGiShotAt: -Infinity,
   reloadAnim: 0,
   localAnim: null as { kind: AttackKind; time: number } | null,
 };
@@ -471,7 +472,9 @@ function fireAttack(kind: AttackKind, charge = 0) {
   const config = ATTACK_CONFIG[kind];
   if (now < input.nextAttackAt) return;
   if (config.localAmmo && (localStats.ammo <= 0 || localStats.reloading)) return;
+  const isSettledGiShot = kind === 'gi-shot' && now - input.lastGiShotAt >= GI_GUN.firstShotResetMs;
   input.nextAttackAt = now + config.cooldown;
+  if (kind === 'gi-shot') input.lastGiShotAt = now;
   if (config.localAmmo) {
     localStats.ammo = Math.max(0, localStats.ammo - 1);
     renderAmmo();
@@ -490,9 +493,9 @@ function fireAttack(kind: AttackKind, charge = 0) {
   const direction = new THREE.Vector3();
   camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
-  if (kind === 'gi-shot') applyGiSpread(direction);
+  if (kind === 'gi-shot' && !isSettledGiShot) applyGiSpread(direction);
   network.sendAttack(kind, origin, direction, charge, visualOrigin);
-  if (kind === 'gi-shot') applyGiRecoil();
+  if (kind === 'gi-shot' && !isSettledGiShot) applyGiRecoil();
 }
 
 function applyGiSpread(direction: THREE.Vector3) {

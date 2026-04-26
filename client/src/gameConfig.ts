@@ -37,4 +37,5 @@ export const GI_GUN = {
   aimedRecoilMult: 0.55,
   maxRecoverablePitchRad: 0.14,
   maxRecoverableYawRad: 0.08,
+  firstShotResetMs: 340,
 };

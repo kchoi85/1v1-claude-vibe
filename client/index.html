@@ -27,12 +27,13 @@
         position: absolute;
         top: 50%;
         left: 50%;
-        width: 18px;
-        height: 18px;
-        margin: -9px 0 0 -9px;
+        width: 5px;
+        height: 5px;
+        margin: -2.5px 0 0 -2.5px;
+        background: white;
+        border-radius: 50%;
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
       }
-      #crosshair::before,
-      #crosshair::after,
       #hit-x::before,
       #hit-x::after {
         content: '';
@@ -41,16 +42,6 @@
         left: 50%;
         top: 50%;
         transform-origin: center;
-      }
-      #crosshair::before {
-        width: 18px;
-        height: 2px;
-        transform: translate(-50%, -50%);
-      }
-      #crosshair::after {
-        width: 2px;
-        height: 18px;
-        transform: translate(-50%, -50%);
       }
       #hit-x {
         position: absolute;
