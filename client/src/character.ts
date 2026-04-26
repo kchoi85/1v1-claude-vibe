@@ -86,9 +86,17 @@ export function makeWeapon(className: PlayerClass): THREE.Group {
 
 function makeGun(): THREE.Group {
   const gun = new THREE.Group();
-  const metal = new THREE.MeshStandardMaterial({ color: 0x1a2430, roughness: 0.55, metalness: 0.35 });
+  const metal = new THREE.MeshStandardMaterial({
+    color: 0x1a2430,
+    roughness: 0.55,
+    metalness: 0.35,
+  });
   const gripMat = new THREE.MeshStandardMaterial({ color: 0x111416, roughness: 0.7 });
-  const barrelMat = new THREE.MeshStandardMaterial({ color: 0x56606a, roughness: 0.35, metalness: 0.55 });
+  const barrelMat = new THREE.MeshStandardMaterial({
+    color: 0x56606a,
+    roughness: 0.35,
+    metalness: 0.55,
+  });
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.56), metal);
   body.position.z = -0.16;
@@ -122,7 +130,11 @@ function makeGun(): THREE.Group {
 function makeWand(): THREE.Group {
   const wand = new THREE.Group();
   const wood = new THREE.MeshStandardMaterial({ color: 0x5a341d, roughness: 0.75 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xcaa85c, metalness: 0.35, roughness: 0.35 });
+  const gold = new THREE.MeshStandardMaterial({
+    color: 0xcaa85c,
+    metalness: 0.35,
+    roughness: 0.35,
+  });
   const orb = new THREE.MeshStandardMaterial({
     color: 0x7be7ff,
     emissive: 0x4ecfff,
@@ -156,9 +168,17 @@ function makeWand(): THREE.Group {
 
 function makeDagger(): THREE.Group {
   const dagger = new THREE.Group();
-  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xcfd8df, metalness: 0.65, roughness: 0.25 });
+  const bladeMat = new THREE.MeshStandardMaterial({
+    color: 0xcfd8df,
+    metalness: 0.65,
+    roughness: 0.25,
+  });
   const handleMat = new THREE.MeshStandardMaterial({ color: 0x17181c, roughness: 0.65 });
-  const guardMat = new THREE.MeshStandardMaterial({ color: 0x8d7f5b, metalness: 0.45, roughness: 0.3 });
+  const guardMat = new THREE.MeshStandardMaterial({
+    color: 0x8d7f5b,
+    metalness: 0.45,
+    roughness: 0.3,
+  });
 
   const blade = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.52, 4), bladeMat);
   blade.rotation.x = -Math.PI / 2;

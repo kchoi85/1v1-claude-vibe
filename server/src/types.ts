@@ -15,7 +15,12 @@ export type PlayerState = {
 };
 
 export type PlayerClass = 'gi' | 'mage' | 'assassin';
-export type AttackKind = 'gi-shot' | 'mage-shot' | 'mage-charged' | 'assassin-slash' | 'assassin-charged';
+export type AttackKind =
+  | 'gi-shot'
+  | 'mage-shot'
+  | 'mage-charged'
+  | 'assassin-slash'
+  | 'assassin-charged';
 
 export type AttackEffect = {
   id: string;

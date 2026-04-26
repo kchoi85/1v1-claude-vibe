@@ -1,5 +1,12 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import type { AttackEffect, AttackKind, ClientMessage, PlayerClass, PlayerState, ServerMessage } from './types.js';
+import type {
+  AttackEffect,
+  AttackKind,
+  ClientMessage,
+  PlayerClass,
+  PlayerState,
+  ServerMessage,
+} from './types.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const TICK_MS = 50;
@@ -47,7 +54,14 @@ const ATTACKS: Record<
   'mage-shot': { className: 'mage', damage: 30, range: 55, radius: 0.75 },
   'mage-charged': { className: 'mage', damage: 60, range: 60, radius: 1.05, cooldownMs: 1100 },
   'assassin-slash': { className: 'assassin', damage: 25, range: 2.25, radius: 1.0, melee: true },
-  'assassin-charged': { className: 'assassin', damage: 55, range: 3.0, radius: 1.2, cooldownMs: 850, melee: true },
+  'assassin-charged': {
+    className: 'assassin',
+    damage: 55,
+    range: 3.0,
+    radius: 1.2,
+    cooldownMs: 850,
+    melee: true,
+  },
 };
 
 const wss = new WebSocketServer({ port: PORT });
@@ -203,11 +217,20 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   conn.lastAttackAt = now;
 
   const origin = eyePoint(conn.state);
-  const dir = normalizeVector(msg.dx, msg.dy, msg.dz, yawPitchDirection(conn.state.ry, conn.state.rx));
+  const dir = normalizeVector(
+    msg.dx,
+    msg.dy,
+    msg.dz,
+    yawPitchDirection(conn.state.ry, conn.state.rx),
+  );
   const hit = findHit(conn, origin, dir, spec);
   const endpoint = hit
     ? hit.point
-    : { x: origin.x + dir.x * spec.range, y: origin.y + dir.y * spec.range, z: origin.z + dir.z * spec.range };
+    : {
+        x: origin.x + dir.x * spec.range,
+        y: origin.y + dir.y * spec.range,
+        z: origin.z + dir.z * spec.range,
+      };
 
   const effect: AttackEffect = {
     id: String(nextEventId++),
@@ -282,7 +305,11 @@ function findHit(
 
     const along = dot(toTarget, dir);
     if (along < 0 || along > spec.range) continue;
-    const closest = { x: origin.x + dir.x * along, y: origin.y + dir.y * along, z: origin.z + dir.z * along };
+    const closest = {
+      x: origin.x + dir.x * along,
+      y: origin.y + dir.y * along,
+      z: origin.z + dir.z * along,
+    };
     const miss = length(sub(center, closest));
     if (miss <= spec.radius) {
       best = chooseCloser(best, { target, point: closest, dist: along });
