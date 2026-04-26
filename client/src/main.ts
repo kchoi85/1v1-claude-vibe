@@ -2,9 +2,17 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { ensureAudio, playAttackSound, sounds } from './audio.js';
 import { makeWeapon } from './character.js';
-import { ATTACK_CONFIG, CLASS_LABELS, CLASS_MAX_HP, CLASS_MOVE, GI_GUN } from './gameConfig.js';
+import { ATTACK_CONFIG, CLASS_MAX_HP, CLASS_MOVE, GI_GUN } from './gameConfig.js';
 import { Network } from './network.js';
 import { RemotePlayers } from './remote.js';
+import {
+  clearNameError,
+  renderAmmo as renderAmmoUi,
+  renderHp as renderHpUi,
+  renderPlayerList as renderPlayerListUi,
+  renderScore as renderScoreUi,
+  showNameError,
+} from './ui.js';
 import type { AttackEffect, AttackKind, DamageEvent, PlayerClass, PlayerState } from './types.js';
 
 const app = document.getElementById('app')!;
@@ -29,8 +37,7 @@ const classCards = Array.from(document.querySelectorAll<HTMLButtonElement>('.cla
 
 const score = { me: 0, opp: 0 };
 function renderScore() {
-  scoreMeEl.textContent = String(score.me);
-  scoreOppEl.textContent = String(score.opp);
+  renderScoreUi(scoreMeEl, scoreOppEl, score);
 }
 renderScore();
 
@@ -329,55 +336,15 @@ function updateScoreFromPlayers(players: PlayerState[]) {
 }
 
 function renderPlayerList() {
-  playerListEl.innerHTML = '';
-  for (const p of lastPlayers) {
-    const isMe = p.id === network.myId;
-    const row = document.createElement('div');
-    row.className = `row ${isMe ? 'me' : 'opp'}`;
-    const dot = document.createElement('span');
-    dot.className = 'dot';
-    const name = document.createElement('span');
-    name.textContent = `${p.name || `Player ${p.id}`} - ${CLASS_LABELS[p.className]} ${p.hp}/${p.maxHp}`;
-    row.appendChild(dot);
-    row.appendChild(name);
-    if (isMe) {
-      const you = document.createElement('span');
-      you.className = 'you';
-      you.textContent = '(you)';
-      row.appendChild(you);
-    }
-    playerListEl.appendChild(row);
-  }
+  renderPlayerListUi(playerListEl, lastPlayers, network.myId);
 }
 
 function renderAmmo() {
-  if (!hasJoined) {
-    weaponLabelEl.textContent = selectedClass === 'gi' ? 'Ammo' : 'Weapon';
-    ammoCountEl.textContent =
-      selectedClass === 'gi' ? '30/30' : selectedClass === 'mage' ? 'Wand' : 'Dagger';
-  } else if (localStats.className === 'gi') {
-    weaponLabelEl.textContent = 'Ammo';
-    ammoCountEl.textContent = localStats.reloading
-      ? 'Reloading'
-      : `${localStats.ammo}/${localStats.maxAmmo}`;
-  } else {
-    weaponLabelEl.textContent = 'Weapon';
-    ammoCountEl.textContent =
-      selectedClass === 'mage' || localStats.className === 'mage' ? 'Wand' : 'Dagger';
-  }
+  renderAmmoUi(weaponLabelEl, ammoCountEl, hasJoined, selectedClass, localStats);
 }
 
 function renderHp() {
-  hpTextEl.textContent = `${localStats.hp}/${localStats.maxHp}`;
-  const pct =
-    localStats.maxHp > 0 ? THREE.MathUtils.clamp(localStats.hp / localStats.maxHp, 0, 1) : 0;
-  hpFillEl.style.width = `${pct * 100}%`;
-  hpFillEl.style.background =
-    pct > 0.55
-      ? 'linear-gradient(90deg, #35d07f, #b9f36b)'
-      : pct > 0.25
-        ? 'linear-gradient(90deg, #f2c94c, #f2994a)'
-        : 'linear-gradient(90deg, #eb5757, #ff8a65)';
+  renderHpUi(hpTextEl, hpFillEl, localStats);
 }
 
 joinBtn.disabled = true;
@@ -385,14 +352,11 @@ joinBtn.disabled = true;
 function attemptJoin() {
   const raw = nameInput.value.trim().slice(0, 16);
   if (!raw) {
-    nameErrorEl.textContent = 'Name is required';
-    nameInput.setAttribute('aria-invalid', 'true');
-    nameInput.focus();
+    showNameError(nameInput, nameErrorEl, 'Name is required');
     return;
   }
   ensureAudio();
-  nameErrorEl.textContent = '';
-  nameInput.removeAttribute('aria-invalid');
+  clearNameError(nameInput, nameErrorEl);
   myName = raw;
   if (!network.ws || network.ws.readyState !== WebSocket.OPEN) return;
   localStats.className = selectedClass;
@@ -411,8 +375,7 @@ nameInput.addEventListener('keydown', (e) => {
 });
 nameInput.addEventListener('input', () => {
   if (!nameInput.value.trim()) return;
-  nameErrorEl.textContent = '';
-  nameInput.removeAttribute('aria-invalid');
+  clearNameError(nameInput, nameErrorEl);
 });
 
 overlayPanel.addEventListener('click', () => {
