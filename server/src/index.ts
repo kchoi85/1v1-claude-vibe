@@ -28,6 +28,16 @@ type Connected = {
   roundLocked: boolean;
 };
 
+type TrainingDummy = {
+  id: string;
+  state: PlayerState;
+  joined: true;
+  roundLocked: boolean;
+  respawnTimer: ReturnType<typeof setTimeout> | null;
+};
+
+type CombatTarget = Connected | TrainingDummy;
+
 const players = new Map<string, Connected>();
 let nextId = 1;
 let nextEventId = 1;
@@ -39,6 +49,29 @@ const CLASS_STATS: Record<
   gi: { maxHp: 150, maxAmmo: 30, cooldownMs: 85, reloadMs: 1250 },
   mage: { maxHp: 100, maxAmmo: 999, cooldownMs: 650, reloadMs: 0 },
   assassin: { maxHp: 100, maxAmmo: 999, cooldownMs: 420, reloadMs: 0 },
+};
+
+const trainingDummy: TrainingDummy = {
+  id: 'training-dummy',
+  state: {
+    id: 'training-dummy',
+    name: 'Training Dummy',
+    className: 'mage',
+    px: 0,
+    py: 0,
+    pz: 0,
+    ry: Math.PI,
+    rx: 0,
+    crouch: false,
+    hp: CLASS_STATS.mage.maxHp,
+    maxHp: CLASS_STATS.mage.maxHp,
+    ammo: CLASS_STATS.mage.maxAmmo,
+    maxAmmo: CLASS_STATS.mage.maxAmmo,
+    score: 0,
+  },
+  joined: true,
+  roundLocked: false,
+  respawnTimer: null,
 };
 
 const ATTACKS: Record<
@@ -65,6 +98,16 @@ const ATTACKS: Record<
     melee: true,
   },
 };
+
+type MapCoverKind = 'crate' | 'van' | 'billboard';
+type MapCoverSpec = { kind: MapCoverKind; x: number; z: number; rot: number };
+type MapBlocker = { min: Vec3; max: Vec3 };
+
+const ARENA_HALF = 18;
+const WALL_HEIGHT = 2.2;
+const WALL_THICKNESS = 0.8;
+const COVER_SEED = 311203;
+const MAP_BLOCKERS = buildMapBlockers();
 
 const wss = new WebSocketServer({ port: PORT });
 
@@ -186,6 +229,7 @@ function joinedSnapshot(): PlayerState[] {
   for (const p of players.values()) {
     if (p.joined) out.push(p.state);
   }
+  out.push(trainingDummy.state);
   return out;
 }
 
@@ -231,13 +275,17 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
     yawPitchDirection(conn.state.ry, conn.state.rx),
   );
   const hit = findHit(conn, rayOrigin, dir, spec);
-  const endpoint = hit
-    ? hit.point
-    : {
-        x: visualOrigin.x + dir.x * spec.range,
-        y: visualOrigin.y + dir.y * spec.range,
-        z: visualOrigin.z + dir.z * spec.range,
-      };
+  const blocker = findMapBlocker(rayOrigin, dir, spec.range, spec.radius);
+  const blocked = !!blocker && (!hit || blocker.dist < hit.dist);
+  const endpoint = blocked
+    ? blocker.point
+    : hit
+      ? hit.point
+      : {
+          x: visualOrigin.x + dir.x * spec.range,
+          y: visualOrigin.y + dir.y * spec.range,
+          z: visualOrigin.z + dir.z * spec.range,
+        };
 
   const effect: AttackEffect = {
     id: String(nextEventId++),
@@ -253,11 +301,11 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
     ex: endpoint.x,
     ey: endpoint.y,
     ez: endpoint.z,
-    hit: !!hit,
+    hit: !!hit && !blocked,
   };
   broadcast({ t: 'attack', effect });
 
-  if (!hit) return;
+  if (blocked || !hit) return;
   const damage = damageForHit(spec, hit);
   hit.target.state.hp = Math.max(0, hit.target.state.hp - damage);
   broadcast({
@@ -276,7 +324,11 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   });
 
   if (hit.target.state.hp <= 0) {
-    finishRound(conn, hit.target);
+    if (isTrainingDummy(hit.target)) {
+      scheduleTrainingDummyRespawn();
+    } else {
+      finishRound(conn, hit.target);
+    }
   }
 }
 
@@ -325,8 +377,9 @@ function findHit(
   spec: (typeof ATTACKS)[AttackKind],
 ): HitResult | null {
   let best: HitResult | null = null;
-  for (const target of players.values()) {
+  for (const target of combatTargets()) {
     if (!target.joined || target.id === attacker.id) continue;
+    if (target.roundLocked || target.state.hp <= 0) continue;
     const roughCenter = {
       x: target.state.px,
       y: target.state.py + (target.state.crouch ? 0.8 : 1.05),
@@ -358,6 +411,195 @@ function damageForHit(spec: (typeof ATTACKS)[AttackKind], hit: HitResult): numbe
   return Math.max(1, Math.round(spec.damage * 0.5));
 }
 
+function combatTargets(): CombatTarget[] {
+  return [...players.values(), trainingDummy];
+}
+
+function isTrainingDummy(target: CombatTarget): target is TrainingDummy {
+  return target.id === trainingDummy.id;
+}
+
+function scheduleTrainingDummyRespawn() {
+  if (trainingDummy.respawnTimer) return;
+  trainingDummy.roundLocked = true;
+  trainingDummy.respawnTimer = setTimeout(() => {
+    trainingDummy.respawnTimer = null;
+    respawnTrainingDummy();
+  }, 700);
+}
+
+function respawnTrainingDummy() {
+  trainingDummy.state.hp = trainingDummy.state.maxHp;
+  trainingDummy.state.px = 0;
+  trainingDummy.state.py = 0;
+  trainingDummy.state.pz = 0;
+  trainingDummy.state.ry = Math.PI;
+  trainingDummy.state.rx = 0;
+  trainingDummy.state.crouch = false;
+  trainingDummy.roundLocked = false;
+}
+
+function buildMapBlockers(): MapBlocker[] {
+  const blockers: MapBlocker[] = [];
+  addBlocker(blockers, 0, -ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT);
+  addBlocker(blockers, 0, ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT);
+  addBlocker(blockers, -ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT);
+  addBlocker(blockers, ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT);
+
+  for (const spec of generatedCoverSpecs()) {
+    const size = coverSize(spec);
+    addBlocker(blockers, spec.x, spec.z, size.w, size.d, size.h);
+  }
+  return blockers;
+}
+
+function generatedCoverSpecs(): MapCoverSpec[] {
+  const rng = seededRandom(COVER_SEED);
+  const specs: MapCoverSpec[] = [];
+
+  for (let i = 0; specs.length < 12 && i < 140; i++) {
+    const mirrored = specs.length % 2 === 1;
+    const base = specs[specs.length - 1];
+    if (mirrored && base) {
+      specs.push({ ...base, z: -base.z, rot: -base.rot });
+      continue;
+    }
+
+    const kind = pickCoverKind(rng());
+    const x = snap(rng() * 26 - 11, 1.5);
+    const z = snap(3.5 + rng() * 10, 1.5);
+    const rot = rng() > 0.5 ? Math.PI / 2 : 0;
+    rng();
+    const spec = { kind, x, z, rot };
+    if (isCoverClear(spec, specs)) specs.push(spec);
+  }
+
+  specs.push(
+    { kind: 'billboard', x: -5.5, z: 0, rot: Math.PI / 2 },
+    { kind: 'billboard', x: 5.5, z: 0, rot: Math.PI / 2 },
+  );
+  return specs;
+}
+
+function pickCoverKind(value: number): MapCoverKind {
+  if (value < 0.34) return 'van';
+  if (value < 0.7) return 'crate';
+  return 'billboard';
+}
+
+function isCoverClear(next: MapCoverSpec, existing: MapCoverSpec[]) {
+  const nextBox = expandBlocker(coverBounds(next), 1.2);
+  const spawnPads = [
+    { min: { x: -4, y: 0, z: -17 }, max: { x: 4, y: 2, z: -11 } },
+    { min: { x: -4, y: 0, z: 11 }, max: { x: 4, y: 2, z: 17 } },
+  ];
+  if (spawnPads.some((pad) => boxesIntersect(pad, nextBox))) return false;
+  return existing.every((spec) => !boxesIntersect(expandBlocker(coverBounds(spec), 1), nextBox));
+}
+
+function coverBounds(spec: MapCoverSpec): MapBlocker {
+  const size = coverSize(spec);
+  return {
+    min: { x: spec.x - size.w / 2, y: 0, z: spec.z - size.d / 2 },
+    max: { x: spec.x + size.w / 2, y: size.h, z: spec.z + size.d / 2 },
+  };
+}
+
+function coverSize(spec: MapCoverSpec) {
+  const turned = Math.abs(Math.sin(spec.rot)) > 0.5;
+  if (spec.kind === 'van')
+    return turned ? { w: 1.8, d: 3.35, h: 2.15 } : { w: 3.35, d: 1.8, h: 2.15 };
+  if (spec.kind === 'crate') return { w: 2.25, d: 1.6, h: 2.2 };
+  return turned ? { w: 0.95, d: 4.1, h: 2.25 } : { w: 4.1, d: 0.95, h: 2.25 };
+}
+
+function addBlocker(blockers: MapBlocker[], x: number, z: number, w: number, d: number, h: number) {
+  blockers.push({
+    min: { x: x - w / 2, y: 0, z: z - d / 2 },
+    max: { x: x + w / 2, y: h, z: z + d / 2 },
+  });
+}
+
+function findMapBlocker(
+  origin: Vec3,
+  dir: Vec3,
+  maxRange: number,
+  extraRadius: number,
+): { point: Vec3; dist: number } | null {
+  let best: { point: Vec3; dist: number } | null = null;
+  for (const blocker of MAP_BLOCKERS) {
+    const hit = rayBoxHit(origin, dir, blocker, extraRadius, maxRange);
+    if (!hit) continue;
+    if (hit.dist < 0.08) continue;
+    best = chooseCloser(best, hit);
+  }
+  return best;
+}
+
+function rayBoxHit(
+  origin: Vec3,
+  dir: Vec3,
+  box: MapBlocker,
+  extraRadius: number,
+  maxRange: number,
+): { point: Vec3; dist: number } | null {
+  const expanded = expandBlocker(box, extraRadius);
+  let near = 0;
+  let far = maxRange;
+
+  for (const axis of ['x', 'y', 'z'] as const) {
+    const originAxis = origin[axis];
+    const dirAxis = dir[axis];
+    if (Math.abs(dirAxis) < 0.000001) {
+      if (originAxis < expanded.min[axis] || originAxis > expanded.max[axis]) return null;
+      continue;
+    }
+    const inv = 1 / dirAxis;
+    let t1 = (expanded.min[axis] - originAxis) * inv;
+    let t2 = (expanded.max[axis] - originAxis) * inv;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    near = Math.max(near, t1);
+    far = Math.min(far, t2);
+    if (near > far) return null;
+  }
+
+  if (near < 0 || near > maxRange) return null;
+  return { point: add(origin, scale(dir, near)), dist: near };
+}
+
+function expandBlocker(box: MapBlocker, amount: number): MapBlocker {
+  return {
+    min: { x: box.min.x - amount, y: box.min.y - amount, z: box.min.z - amount },
+    max: { x: box.max.x + amount, y: box.max.y + amount, z: box.max.z + amount },
+  };
+}
+
+function boxesIntersect(a: MapBlocker, b: MapBlocker) {
+  return (
+    a.min.x <= b.max.x &&
+    a.max.x >= b.min.x &&
+    a.min.y <= b.max.y &&
+    a.max.y >= b.min.y &&
+    a.min.z <= b.max.z &&
+    a.max.z >= b.min.z
+  );
+}
+
+function seededRandom(seed: number) {
+  let state = seed;
+  return () => {
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let value = Math.imul(state ^ (state >>> 15), 1 | state);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function snap(value: number, step: number) {
+  return Math.round(value / step) * step;
+}
+
 function respawn(conn: Connected) {
   const sp = SPAWNS[conn.slot >= 0 ? conn.slot : 0];
   if (conn.reloadTimer) {
@@ -383,7 +625,7 @@ function normalizeClass(value: unknown): PlayerClass {
 type Vec3 = { x: number; y: number; z: number };
 type HitPart = 'head' | 'torso' | 'arm' | 'leg';
 type HitCapsule = { part: HitPart; a: Vec3; b: Vec3; radius: number };
-type HitResult = { target: Connected; point: Vec3; dist: number; part: HitPart };
+type HitResult = { target: CombatTarget; point: Vec3; dist: number; part: HitPart };
 
 function playerHitCapsules(state: PlayerState): HitCapsule[] {
   const crouchScale = state.crouch ? 0.65 : 1;

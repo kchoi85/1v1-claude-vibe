@@ -7,7 +7,7 @@ type Bounds = {
   maxZ: number;
 };
 
-type CoverKind = 'crate' | 'car' | 'barrier';
+type CoverKind = 'crate' | 'van' | 'billboard';
 
 type CoverSpec = {
   kind: CoverKind;
@@ -25,7 +25,7 @@ export type Arena = {
 const ARENA_HALF = 18;
 const WALL_HEIGHT = 2.2;
 const WALL_THICKNESS = 0.8;
-const COVER_SEED = 92641;
+const COVER_SEED = 311203;
 
 export function buildArena(scene: THREE.Scene): Arena {
   const collisionBoxes: THREE.Box3[] = [];
@@ -47,7 +47,7 @@ export function buildArena(scene: THREE.Scene): Arena {
 function addGround(scene: THREE.Scene) {
   const grass = new THREE.Mesh(
     new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({ color: 0x6f9f7c, roughness: 0.85 }),
+    new THREE.MeshStandardMaterial({ color: 0x8acb88, roughness: 0.85 }),
   );
   grass.rotation.x = -Math.PI / 2;
   grass.receiveShadow = true;
@@ -57,8 +57,8 @@ function addGround(scene: THREE.Scene) {
     new THREE.PlaneGeometry(4.2, ARENA_HALF * 2),
     new THREE.MeshStandardMaterial({
       color: 0x4fc3e8,
-      emissive: 0x103a48,
-      emissiveIntensity: 0.12,
+      emissive: 0x15526a,
+      emissiveIntensity: 0.18,
       roughness: 0.4,
     }),
   );
@@ -67,7 +67,7 @@ function addGround(scene: THREE.Scene) {
   river.receiveShadow = true;
   scene.add(river);
 
-  const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb7c4b0, roughness: 0.82 });
+  const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xf4d6e8, roughness: 0.82 });
   for (const x of [-10.8, -16.0]) {
     const walk = new THREE.Mesh(new THREE.PlaneGeometry(0.55, ARENA_HALF * 2), sidewalkMat);
     walk.rotation.x = -Math.PI / 2;
@@ -78,7 +78,7 @@ function addGround(scene: THREE.Scene) {
 
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(6.8, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({ color: 0x46525a, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: 0x50606d, roughness: 0.9 }),
   );
   road.rotation.x = -Math.PI / 2;
   road.position.y = 0.02;
@@ -87,7 +87,7 @@ function addGround(scene: THREE.Scene) {
 }
 
 function addOuterWalls(scene: THREE.Scene, boxes: THREE.Box3[]) {
-  const colors = [0xffb3c7, 0x9fe7d7, 0xffd36e, 0x9dc7ff];
+  const colors = [0xff9fb6, 0x7fd8be, 0xffd166, 0xa7c7ff];
   addBlock(scene, boxes, 0, -ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, colors[0]);
   addBlock(scene, boxes, 0, ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, colors[1]);
   addBlock(scene, boxes, -ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, colors[2]);
@@ -139,9 +139,9 @@ function addRoadDetails(scene: THREE.Scene) {
 function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
   const rng = seededRandom(COVER_SEED);
   const specs: CoverSpec[] = [];
-  const palette = [0xff8fa3, 0x8fd6ff, 0xffd166, 0xb8f2a4, 0xc7a9ff];
+  const palette = [0xff6f91, 0x58c7df, 0xffc857, 0x95d475, 0xb692f6, 0xff9f68];
 
-  for (let i = 0; specs.length < 10 && i < 120; i++) {
+  for (let i = 0; specs.length < 12 && i < 140; i++) {
     const mirrored = specs.length % 2 === 1;
     const base = specs[specs.length - 1];
     if (mirrored && base) {
@@ -150,8 +150,8 @@ function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
     }
 
     const kind = pickCoverKind(rng());
-    const x = snap(rng() * 24 - 10, 1.5);
-    const z = snap(4 + rng() * 10, 1.5);
+    const x = snap(rng() * 26 - 11, 1.5);
+    const z = snap(3.5 + rng() * 10, 1.5);
     const rot = rng() > 0.5 ? Math.PI / 2 : 0;
     const color = palette[Math.floor(rng() * palette.length)];
     const spec = { kind, x, z, rot, color };
@@ -159,21 +159,21 @@ function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
   }
 
   specs.push(
-    { kind: 'barrier', x: -5.5, z: 0, rot: Math.PI / 2, color: 0xffd166 },
-    { kind: 'barrier', x: 5.5, z: 0, rot: Math.PI / 2, color: 0x8fd6ff },
+    { kind: 'billboard', x: -5.5, z: 0, rot: Math.PI / 2, color: 0xffc857 },
+    { kind: 'billboard', x: 5.5, z: 0, rot: Math.PI / 2, color: 0x58c7df },
   );
 
   for (const spec of specs) {
-    if (spec.kind === 'car') addCar(scene, boxes, spec);
+    if (spec.kind === 'van') addVan(scene, boxes, spec);
     if (spec.kind === 'crate') addCrates(scene, boxes, spec);
-    if (spec.kind === 'barrier') addBarrier(scene, boxes, spec);
+    if (spec.kind === 'billboard') addBillboard(scene, boxes, spec);
   }
 }
 
 function pickCoverKind(value: number): CoverKind {
-  if (value < 0.34) return 'car';
+  if (value < 0.34) return 'van';
   if (value < 0.7) return 'crate';
-  return 'barrier';
+  return 'billboard';
 }
 
 function isCoverClear(next: CoverSpec, existing: CoverSpec[]) {
@@ -196,13 +196,13 @@ function coverBounds(spec: CoverSpec) {
 
 function coverSize(spec: CoverSpec) {
   const turned = Math.abs(Math.sin(spec.rot)) > 0.5;
-  if (spec.kind === 'car')
-    return turned ? { w: 1.65, d: 3.1, h: 1.25 } : { w: 3.1, d: 1.65, h: 1.25 };
-  if (spec.kind === 'crate') return { w: 2.1, d: 1.45, h: 1.45 };
-  return turned ? { w: 0.75, d: 3.8, h: 1.35 } : { w: 3.8, d: 0.75, h: 1.35 };
+  if (spec.kind === 'van')
+    return turned ? { w: 1.8, d: 3.35, h: 2.15 } : { w: 3.35, d: 1.8, h: 2.15 };
+  if (spec.kind === 'crate') return { w: 2.25, d: 1.6, h: 2.2 };
+  return turned ? { w: 0.95, d: 4.1, h: 2.25 } : { w: 4.1, d: 0.95, h: 2.25 };
 }
 
-function addCar(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
+function addVan(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
   const bodyMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.55 });
   const roofMat = new THREE.MeshStandardMaterial({
     color: 0xf5fbff,
@@ -210,18 +210,26 @@ function addCar(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
     metalness: 0.05,
   });
   const tireMat = new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.8 });
-  const car = new THREE.Group();
+  const van = new THREE.Group();
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.7, 1.35), bodyMat);
-  body.position.y = 0.55;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.05, 1.35, 1.48), bodyMat);
+  body.position.y = 0.92;
   body.castShadow = true;
   body.receiveShadow = true;
-  car.add(body);
+  van.add(body);
 
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.48, 1.05), roofMat);
-  roof.position.set(-0.15, 1.08, 0);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.45, 1.18), roofMat);
+  roof.position.set(-0.25, 1.75, 0);
   roof.castShadow = true;
-  car.add(roof);
+  van.add(roof);
+
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(1.4, 0.22, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0xfff1a8, roughness: 0.4 }),
+  );
+  sign.position.set(0.35, 1.72, -0.78);
+  sign.castShadow = true;
+  van.add(sign);
 
   for (const x of [-0.95, 0.95]) {
     for (const z of [-0.73, 0.73]) {
@@ -229,13 +237,13 @@ function addCar(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
       tire.rotation.x = Math.PI / 2;
       tire.position.set(x, 0.26, z);
       tire.castShadow = true;
-      car.add(tire);
+      van.add(tire);
     }
   }
 
-  car.position.set(spec.x, 0, spec.z);
-  car.rotation.y = spec.rot;
-  scene.add(car);
+  van.position.set(spec.x, 0, spec.z);
+  van.rotation.y = spec.rot;
+  scene.add(van);
   boxes.push(coverBounds(spec));
 }
 
@@ -247,7 +255,9 @@ function addCrates(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
   const positions = [
     [-0.48, 0.34, 0],
     [0.48, 0.34, 0],
-    [0, 1.02, -0.1],
+    [-0.48, 1.02, -0.08],
+    [0.48, 1.02, 0.08],
+    [0, 1.7, 0],
   ];
   for (const [x, y, z] of positions) {
     const crate = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.68, 0.82), crateMat);
@@ -268,29 +278,48 @@ function addCrates(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
   boxes.push(coverBounds(spec));
 }
 
-function addBarrier(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
+function addBillboard(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
   const railMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.6 });
   const postMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 });
-  const barrier = new THREE.Group();
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0xf7f0ff, roughness: 0.48 });
+  const billboard = new THREE.Group();
 
-  for (const y of [0.55, 1.05]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.18, 0.18), railMat);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(3.65, 1.1, 0.2), panelMat);
+  panel.position.y = 1.45;
+  panel.castShadow = true;
+  panel.receiveShadow = true;
+  billboard.add(panel);
+
+  for (const y of [0.55, 2.05]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.18, 0.2), railMat);
     rail.position.y = y;
     rail.castShadow = true;
     rail.receiveShadow = true;
-    barrier.add(rail);
+    billboard.add(rail);
   }
   for (const x of [-1.5, 1.5]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.35, 0.22), postMat);
-    post.position.set(x, 0.67, 0);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.25, 0.22), postMat);
+    post.position.set(x, 1.12, 0);
     post.castShadow = true;
     post.receiveShadow = true;
-    barrier.add(post);
+    billboard.add(post);
   }
 
-  barrier.position.set(spec.x, 0, spec.z);
-  barrier.rotation.y = spec.rot;
-  scene.add(barrier);
+  const heart = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 12, 10),
+    new THREE.MeshStandardMaterial({
+      color: spec.color,
+      emissive: spec.color,
+      emissiveIntensity: 0.15,
+    }),
+  );
+  heart.position.set(0, 1.47, -0.14);
+  heart.scale.set(1.3, 0.9, 0.28);
+  billboard.add(heart);
+
+  billboard.position.set(spec.x, 0, spec.z);
+  billboard.rotation.y = spec.rot;
+  scene.add(billboard);
   boxes.push(coverBounds(spec));
 }
 

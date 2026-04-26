@@ -81,6 +81,41 @@ const keys = {
   crouch: false,
 };
 
+const gameplayKeyCodes = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'KeyR',
+  'ShiftLeft',
+  'ShiftRight',
+  'Space',
+  'ControlLeft',
+  'ControlRight',
+]);
+
+function shouldCaptureGameplayKey(e: KeyboardEvent) {
+  return hasJoined && gameplayKeyCodes.has(e.code);
+}
+
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (!shouldCaptureGameplayKey(e)) return;
+    e.preventDefault();
+  },
+  { capture: true },
+);
+
+window.addEventListener(
+  'keyup',
+  (e) => {
+    if (!shouldCaptureGameplayKey(e)) return;
+    e.preventDefault();
+  },
+  { capture: true },
+);
+
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyW') keys.w = true;
   if (e.code === 'KeyA') keys.a = true;
@@ -88,6 +123,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyD') keys.d = true;
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.sprint = true;
   if (e.code === 'KeyR') reloadWeapon();
+  if (shouldCaptureGameplayKey(e)) e.preventDefault();
   if (e.code === 'Space') {
     keys.jump = true;
     e.preventDefault();
@@ -162,6 +198,16 @@ const recoil = {
   pitch: 0,
   yaw: 0,
   weaponKick: 0,
+};
+
+const ATTACK_CAMERA_KICK: Record<
+  Exclude<AttackKind, 'gi-shot'>,
+  { pitch: number; yaw: number; recoverPitch: number; recoverYaw: number }
+> = {
+  'mage-shot': { pitch: 0.012, yaw: 0.006, recoverPitch: 0.05, recoverYaw: 0.03 },
+  'mage-charged': { pitch: 0.028, yaw: 0.014, recoverPitch: 0.09, recoverYaw: 0.05 },
+  'assassin-slash': { pitch: 0.01, yaw: 0.018, recoverPitch: 0.045, recoverYaw: 0.055 },
+  'assassin-charged': { pitch: 0.022, yaw: 0.03, recoverPitch: 0.075, recoverYaw: 0.08 },
 };
 
 let hasJoined = false;
@@ -432,6 +478,7 @@ function fireAttack(kind: AttackKind, charge = 0) {
   if (kind === 'gi-shot' && !isSettledGiShot) applyGiSpread(direction);
   network.sendAttack(kind, origin, direction, charge, visualOrigin);
   if (kind === 'gi-shot' && !isSettledGiShot) applyGiRecoil();
+  if (kind !== 'gi-shot') applyAttackCameraKick(kind);
 }
 
 function applyGiSpread(direction: THREE.Vector3) {
@@ -466,6 +513,26 @@ function applyGiRecoil() {
     GI_GUN.maxRecoverableYawRad,
   );
   recoil.weaponKick = Math.min(1, recoil.weaponKick + 0.42);
+}
+
+function applyAttackCameraKick(kind: Exclude<AttackKind, 'gi-shot'>) {
+  const kick = ATTACK_CAMERA_KICK[kind];
+  const pitchKick = kick.pitch * (0.75 + Math.random() * 0.5);
+  const yawKick = kick.yaw * (Math.random() * 2 - 1);
+  const nextPitch = THREE.MathUtils.clamp(
+    camera.rotation.x + pitchKick,
+    -Math.PI / 2 + 0.01,
+    Math.PI / 2 - 0.01,
+  );
+  const appliedPitch = nextPitch - camera.rotation.x;
+  camera.rotation.x = nextPitch;
+  camera.rotation.y += yawKick;
+  recoil.pitch = THREE.MathUtils.clamp(
+    recoil.pitch + appliedPitch,
+    -kick.recoverPitch,
+    kick.recoverPitch,
+  );
+  recoil.yaw = THREE.MathUtils.clamp(recoil.yaw + yawKick, -kick.recoverYaw, kick.recoverYaw);
 }
 
 function getWeaponTipWorld(): THREE.Vector3 {
