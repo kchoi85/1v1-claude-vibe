@@ -24,6 +24,7 @@ export class Network {
   onDamage?: (event: DamageEvent) => void;
   onReloaded?: (ammo: number) => void;
   onRoundOver?: (event: RoundOverEvent) => void;
+  onMapSeed?: (seed: number) => void;
 
   connect(url: string) {
     const ws = new WebSocket(url);
@@ -44,6 +45,7 @@ export class Network {
       }
       if (msg.t === 'welcome') {
         this.myId = msg.id;
+        this.onMapSeed?.(msg.mapSeed);
         this.onState?.(msg.players);
       } else if (msg.t === 'state') {
         this.onState?.(msg.players);
@@ -67,8 +69,16 @@ export class Network {
     this.send({ t: 'join', name, className });
   }
 
-  sendInput(px: number, py: number, pz: number, ry: number, rx: number, crouch: boolean) {
-    this.send({ t: 'input', px, py, pz, ry, rx, crouch });
+  sendInput(
+    px: number,
+    py: number,
+    pz: number,
+    ry: number,
+    rx: number,
+    lean: number,
+    crouch: boolean,
+  ) {
+    this.send({ t: 'input', px, py, pz, ry, rx, lean, crouch });
   }
 
   sendAttack(

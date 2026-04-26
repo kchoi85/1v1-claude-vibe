@@ -91,6 +91,13 @@ export function makeCharacter(bodyColor: number, className: PlayerClass = 'gi'):
   weapon.rotation.set(0.08, -0.2, -0.12);
   group.add(weapon);
 
+  group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+
   return { group, head, weapon, rightArm: rArm };
 }
 
@@ -309,7 +316,10 @@ function makeGun(): THREE.Group {
   gun.add(mag);
 
   gun.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) obj.castShadow = true;
+    if (obj instanceof THREE.Mesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
   });
   return gun;
 }
@@ -348,7 +358,10 @@ function makeWand(): THREE.Group {
   wand.add(light);
 
   wand.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) obj.castShadow = true;
+    if (obj instanceof THREE.Mesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
   });
   return wand;
 }
@@ -382,7 +395,10 @@ function makeDagger(): THREE.Group {
   dagger.add(guard);
 
   dagger.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) obj.castShadow = true;
+    if (obj instanceof THREE.Mesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
   });
   return dagger;
 }

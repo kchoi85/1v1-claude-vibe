@@ -20,14 +20,17 @@ type CoverSpec = {
 export type Arena = {
   bounds: Bounds;
   collisionBoxes: THREE.Box3[];
+  group: THREE.Group;
 };
 
 const ARENA_HALF = 18;
 const WALL_HEIGHT = 2.2;
 const WALL_THICKNESS = 0.8;
-const COVER_SEED = 311203;
+export const DEFAULT_MAP_SEED = 311203;
 
-export function buildArena(scene: THREE.Scene): Arena {
+export function buildArena(scene: THREE.Scene, seed = DEFAULT_MAP_SEED): Arena {
+  const group = new THREE.Group();
+  scene.add(group);
   const collisionBoxes: THREE.Box3[] = [];
   const bounds = {
     minX: -ARENA_HALF,
@@ -36,18 +39,24 @@ export function buildArena(scene: THREE.Scene): Arena {
     maxZ: ARENA_HALF,
   };
 
-  addGround(scene);
-  addOuterWalls(scene, collisionBoxes);
-  addRoadDetails(scene);
-  addGeneratedCover(scene, collisionBoxes);
+  addGround(group);
+  addOuterWalls(group, collisionBoxes);
+  addRoadDetails(group);
+  addGeneratedCover(group, collisionBoxes, seed);
+  group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
 
-  return { bounds, collisionBoxes };
+  return { bounds, collisionBoxes, group };
 }
 
-function addGround(scene: THREE.Scene) {
+function addGround(scene: THREE.Group) {
   const grass = new THREE.Mesh(
     new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({ color: 0x8acb88, roughness: 0.85 }),
+    new THREE.MeshStandardMaterial({ color: 0x6f9368, roughness: 0.9 }),
   );
   grass.rotation.x = -Math.PI / 2;
   grass.receiveShadow = true;
@@ -56,10 +65,8 @@ function addGround(scene: THREE.Scene) {
   const river = new THREE.Mesh(
     new THREE.PlaneGeometry(4.2, ARENA_HALF * 2),
     new THREE.MeshStandardMaterial({
-      color: 0x4fc3e8,
-      emissive: 0x15526a,
-      emissiveIntensity: 0.18,
-      roughness: 0.4,
+      color: 0x3d9baa,
+      roughness: 0.65,
     }),
   );
   river.rotation.x = -Math.PI / 2;
@@ -67,7 +74,7 @@ function addGround(scene: THREE.Scene) {
   river.receiveShadow = true;
   scene.add(river);
 
-  const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xf4d6e8, roughness: 0.82 });
+  const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x9fa4a3, roughness: 0.86 });
   for (const x of [-10.8, -16.0]) {
     const walk = new THREE.Mesh(new THREE.PlaneGeometry(0.55, ARENA_HALF * 2), sidewalkMat);
     walk.rotation.x = -Math.PI / 2;
@@ -78,7 +85,7 @@ function addGround(scene: THREE.Scene) {
 
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(6.8, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({ color: 0x50606d, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: 0x4b5355, roughness: 0.92 }),
   );
   road.rotation.x = -Math.PI / 2;
   road.position.y = 0.02;
@@ -86,60 +93,28 @@ function addGround(scene: THREE.Scene) {
   scene.add(road);
 }
 
-function addOuterWalls(scene: THREE.Scene, boxes: THREE.Box3[]) {
-  const colors = [0xff9fb6, 0x7fd8be, 0xffd166, 0xa7c7ff];
+function addOuterWalls(scene: THREE.Group, boxes: THREE.Box3[]) {
+  const colors = [0x8d8f8f, 0x828989, 0x777d78, 0x8a8379];
   addBlock(scene, boxes, 0, -ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, colors[0]);
   addBlock(scene, boxes, 0, ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, colors[1]);
   addBlock(scene, boxes, -ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, colors[2]);
   addBlock(scene, boxes, ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, colors[3]);
-
-  for (const [x, z] of [
-    [-ARENA_HALF, -ARENA_HALF],
-    [ARENA_HALF, -ARENA_HALF],
-    [-ARENA_HALF, ARENA_HALF],
-    [ARENA_HALF, ARENA_HALF],
-  ]) {
-    const cap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.45, 14, 10),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }),
-    );
-    cap.position.set(x, WALL_HEIGHT + 0.15, z);
-    cap.castShadow = true;
-    scene.add(cap);
-  }
 }
 
-function addRoadDetails(scene: THREE.Scene) {
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xffef8a, roughness: 0.45 });
+function addRoadDetails(scene: THREE.Group) {
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0xc9bd65, roughness: 0.65 });
   for (let z = -14; z <= 14; z += 4) {
     const line = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 1.6), lineMat);
     line.rotation.x = -Math.PI / 2;
     line.position.set(0, 0.035, z);
     scene.add(line);
   }
-
-  const plankMat = new THREE.MeshStandardMaterial({ color: 0xa96f45, roughness: 0.75 });
-  for (let z = -2.4; z <= 2.4; z += 0.8) {
-    const plank = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.12, 0.32), plankMat);
-    plank.position.set(-13.4, 0.09, z);
-    plank.castShadow = true;
-    plank.receiveShadow = true;
-    scene.add(plank);
-  }
-
-  const crosswalkMat = new THREE.MeshStandardMaterial({ color: 0xf4f7ed, roughness: 0.6 });
-  for (const x of [-2.4, -1.6, -0.8, 0, 0.8, 1.6, 2.4]) {
-    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.38, 3.3), crosswalkMat);
-    stripe.rotation.x = -Math.PI / 2;
-    stripe.position.set(x, 0.04, -8.2);
-    scene.add(stripe);
-  }
 }
 
-function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
-  const rng = seededRandom(COVER_SEED);
+function addGeneratedCover(scene: THREE.Group, boxes: THREE.Box3[], seed: number) {
+  const rng = seededRandom(seed);
   const specs: CoverSpec[] = [];
-  const palette = [0xff6f91, 0x58c7df, 0xffc857, 0x95d475, 0xb692f6, 0xff9f68];
+  const palette = [0x60726d, 0x7c756a, 0x5d7278, 0x74736b, 0x687468];
 
   for (let i = 0; specs.length < 12 && i < 140; i++) {
     const mirrored = specs.length % 2 === 1;
@@ -149,7 +124,7 @@ function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
       continue;
     }
 
-    const kind = pickCoverKind(rng());
+    const kind = 'crate';
     const x = snap(rng() * 26 - 11, 1.5);
     const z = snap(3.5 + rng() * 10, 1.5);
     const rot = rng() > 0.5 ? Math.PI / 2 : 0;
@@ -157,11 +132,6 @@ function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
     const spec = { kind, x, z, rot, color };
     if (isCoverClear(spec, specs)) specs.push(spec);
   }
-
-  specs.push(
-    { kind: 'billboard', x: -5.5, z: 0, rot: Math.PI / 2, color: 0xffc857 },
-    { kind: 'billboard', x: 5.5, z: 0, rot: Math.PI / 2, color: 0x58c7df },
-  );
 
   for (const spec of specs) {
     if (spec.kind === 'van') addVan(scene, boxes, spec);
@@ -171,9 +141,7 @@ function addGeneratedCover(scene: THREE.Scene, boxes: THREE.Box3[]) {
 }
 
 function pickCoverKind(value: number): CoverKind {
-  if (value < 0.34) return 'van';
-  if (value < 0.7) return 'crate';
-  return 'billboard';
+  return value < 1 ? 'crate' : 'crate';
 }
 
 function isCoverClear(next: CoverSpec, existing: CoverSpec[]) {
@@ -181,6 +149,8 @@ function isCoverClear(next: CoverSpec, existing: CoverSpec[]) {
   const spawnPads = [
     new THREE.Box3(new THREE.Vector3(-4, 0, -17), new THREE.Vector3(4, 2, -11)),
     new THREE.Box3(new THREE.Vector3(-4, 0, 11), new THREE.Vector3(4, 2, 17)),
+    new THREE.Box3(new THREE.Vector3(-17, 0, -4), new THREE.Vector3(-11, 2, 4)),
+    new THREE.Box3(new THREE.Vector3(11, 0, -4), new THREE.Vector3(17, 2, 4)),
   ];
   if (spawnPads.some((pad) => pad.intersectsBox(nextBox))) return false;
   return existing.every((spec) => !coverBounds(spec).expandByScalar(1.0).intersectsBox(nextBox));
@@ -198,11 +168,11 @@ function coverSize(spec: CoverSpec) {
   const turned = Math.abs(Math.sin(spec.rot)) > 0.5;
   if (spec.kind === 'van')
     return turned ? { w: 1.8, d: 3.35, h: 2.15 } : { w: 3.35, d: 1.8, h: 2.15 };
-  if (spec.kind === 'crate') return { w: 2.25, d: 1.6, h: 2.2 };
+  if (spec.kind === 'crate') return turned ? { w: 1.25, d: 2.1, h: 2.05 } : { w: 2.1, d: 1.25, h: 2.05 };
   return turned ? { w: 0.95, d: 4.1, h: 2.25 } : { w: 4.1, d: 0.95, h: 2.25 };
 }
 
-function addVan(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
+function addVan(scene: THREE.Group, boxes: THREE.Box3[], spec: CoverSpec) {
   const bodyMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.55 });
   const roofMat = new THREE.MeshStandardMaterial({
     color: 0xf5fbff,
@@ -247,38 +217,20 @@ function addVan(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
   boxes.push(coverBounds(spec));
 }
 
-function addCrates(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
+function addCrates(scene: THREE.Group, boxes: THREE.Box3[], spec: CoverSpec) {
+  const size = coverSize(spec);
   const crateMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.78 });
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x7a5c42, roughness: 0.7 });
-  const stack = new THREE.Group();
+  const stack = new THREE.Mesh(new THREE.BoxGeometry(size.w, size.h, size.d), crateMat);
 
-  const positions = [
-    [-0.48, 0.34, 0],
-    [0.48, 0.34, 0],
-    [-0.48, 1.02, -0.08],
-    [0.48, 1.02, 0.08],
-    [0, 1.7, 0],
-  ];
-  for (const [x, y, z] of positions) {
-    const crate = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.68, 0.82), crateMat);
-    crate.position.set(x, y, z);
-    crate.castShadow = true;
-    crate.receiveShadow = true;
-    stack.add(crate);
-
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.9), trimMat);
-    band.position.set(x, y + 0.02, z);
-    band.castShadow = true;
-    stack.add(band);
-  }
-
-  stack.position.set(spec.x, 0, spec.z);
+  stack.position.set(spec.x, size.h / 2, spec.z);
   stack.rotation.y = spec.rot;
+  stack.castShadow = true;
+  stack.receiveShadow = true;
   scene.add(stack);
   boxes.push(coverBounds(spec));
 }
 
-function addBillboard(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) {
+function addBillboard(scene: THREE.Group, boxes: THREE.Box3[], spec: CoverSpec) {
   const railMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.6 });
   const postMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 });
   const panelMat = new THREE.MeshStandardMaterial({ color: 0xf7f0ff, roughness: 0.48 });
@@ -324,7 +276,7 @@ function addBillboard(scene: THREE.Scene, boxes: THREE.Box3[], spec: CoverSpec) 
 }
 
 function addBlock(
-  scene: THREE.Scene,
+  scene: THREE.Group,
   boxes: THREE.Box3[],
   x: number,
   z: number,

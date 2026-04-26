@@ -7,6 +7,7 @@ export type PlayerState = {
   pz: number;
   ry: number;
   rx: number;
+  lean: number;
   crouch: boolean;
   hp: number;
   maxHp: number;
@@ -38,6 +39,8 @@ export type AttackEffect = {
   ey: number;
   ez: number;
   hit: boolean;
+  blocked?: boolean;
+  sound?: boolean;
 };
 
 export type DamageEvent = {
@@ -47,9 +50,14 @@ export type DamageEvent = {
   amount: number;
   hp: number;
   maxHp: number;
+  part: 'head' | 'torso' | 'arm' | 'leg';
+  headshot: boolean;
   x: number;
   y: number;
   z: number;
+  hx: number;
+  hy: number;
+  hz: number;
 };
 
 export type RoundOverEvent = {
@@ -59,7 +67,7 @@ export type RoundOverEvent = {
 };
 
 export type ServerMessage =
-  | { t: 'welcome'; id: string; players: PlayerState[] }
+  | { t: 'welcome'; id: string; players: PlayerState[]; mapSeed: number }
   | { t: 'state'; players: PlayerState[] }
   | { t: 'spawn'; x: number; z: number; ry: number }
   | { t: 'attack'; effect: AttackEffect }
@@ -77,6 +85,7 @@ export type ClientMessage =
       pz: number;
       ry: number;
       rx: number;
+      lean: number;
       crouch: boolean;
     }
   | {

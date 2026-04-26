@@ -5,7 +5,15 @@ import type { AttackKind, PlayerClass, PlayerState } from './types.js';
 type Remote = {
   char: Character;
   className: PlayerClass;
-  target: { x: number; y: number; z: number; ry: number; rx: number; crouch: boolean };
+  target: {
+    x: number;
+    y: number;
+    z: number;
+    ry: number;
+    rx: number;
+    lean: number;
+    crouch: boolean;
+  };
   attackAnim: { kind: AttackKind; time: number } | null;
 };
 
@@ -36,7 +44,15 @@ export class RemotePlayers {
         r = {
           char,
           className: p.className,
-          target: { x: p.px, y: p.py, z: p.pz, ry: p.ry, rx: p.rx, crouch: p.crouch },
+          target: {
+            x: p.px,
+            y: p.py,
+            z: p.pz,
+            ry: p.ry,
+            rx: p.rx,
+            lean: p.lean,
+            crouch: p.crouch,
+          },
           attackAnim: null,
         };
         this.remotes.set(p.id, r);
@@ -46,6 +62,7 @@ export class RemotePlayers {
       r.target.z = p.pz;
       r.target.ry = p.ry;
       r.target.rx = p.rx;
+      r.target.lean = p.lean;
       r.target.crouch = p.crouch;
     }
     for (const [id, r] of this.remotes) {
@@ -77,6 +94,7 @@ export class RemotePlayers {
       g.position.y += (r.target.y - g.position.y) * a;
       g.position.z += (r.target.z - g.position.z) * a;
       g.rotation.y += shortestAngle(g.rotation.y, r.target.ry) * a;
+      g.rotation.z += (r.target.lean * -0.16 - g.rotation.z) * a;
 
       r.char.head.rotation.x += (r.target.rx - r.char.head.rotation.x) * a;
 
@@ -115,6 +133,33 @@ export class RemotePlayers {
 
       r.char.rightArm.rotation.x +=
         (THREE.MathUtils.clamp(r.target.rx, -0.9, 0.9) - r.char.rightArm.rotation.x) * a;
+    }
+  }
+
+  addHitMark(id: string, worldPoint: THREE.Vector3, headshot: boolean) {
+    const r = this.remotes.get(id);
+    if (!r) return;
+    const local = r.char.group.worldToLocal(worldPoint.clone());
+    const mark = new THREE.Mesh(
+      new THREE.SphereGeometry(headshot ? 0.085 : 0.065, 10, 8),
+      new THREE.MeshBasicMaterial({ color: headshot ? 0xff1111 : 0x8b0000 }),
+    );
+    mark.position.copy(local);
+    r.char.group.add(mark);
+  }
+
+  clearHitMarks() {
+    for (const r of this.remotes.values()) {
+      const remove: THREE.Object3D[] = [];
+      r.char.group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshBasicMaterial) {
+          const color = obj.material.color.getHex();
+          if (color === 0xff1111 || color === 0x8b0000) remove.push(obj);
+        }
+      });
+      for (const obj of remove) {
+        obj.parent?.remove(obj);
+      }
     }
   }
 }

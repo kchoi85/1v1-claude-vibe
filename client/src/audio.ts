@@ -1,6 +1,7 @@
 import type { AttackKind } from './types.js';
 
 let audioCtx: AudioContext | null = null;
+const MASTER_GAIN = 1.8;
 
 export function ensureAudio(): AudioContext | null {
   const AudioContextCtor =
@@ -20,7 +21,7 @@ function tone(freq: number, duration: number, type: OscillatorType, gain = 0.08,
   const start = ctx.currentTime + delay;
   osc.type = type;
   osc.frequency.setValueAtTime(freq, start);
-  vol.gain.setValueAtTime(gain, start);
+  vol.gain.setValueAtTime(boostGain(gain), start);
   vol.gain.exponentialRampToValueAtTime(0.001, start + duration);
   osc.connect(vol).connect(ctx.destination);
   osc.start(start);
@@ -38,11 +39,15 @@ function noise(duration: number, gain = 0.05, delay = 0) {
   const vol = ctx.createGain();
   const start = ctx.currentTime + delay;
   source.buffer = buffer;
-  vol.gain.setValueAtTime(gain, start);
+  vol.gain.setValueAtTime(boostGain(gain), start);
   vol.gain.exponentialRampToValueAtTime(0.001, start + duration);
   source.connect(vol).connect(ctx.destination);
   source.start(start);
   source.stop(start + duration);
+}
+
+function boostGain(gain: number) {
+  return Math.min(0.28, gain * MASTER_GAIN);
 }
 
 export const sounds = {
@@ -51,13 +56,18 @@ export const sounds = {
     tone(95, 0.055, 'square', 0.045);
   },
   caseDrop() {
-    tone(980, 0.035, 'triangle', 0.025, 0.16);
-    tone(1320, 0.025, 'triangle', 0.018, 0.22);
+    noise(0.018, 0.035, 0.12);
+    tone(1460, 0.026, 'triangle', 0.035, 0.14);
+    tone(820, 0.035, 'square', 0.02, 0.19);
+    tone(2100, 0.018, 'triangle', 0.02, 0.25);
   },
   reload() {
-    tone(280, 0.08, 'sawtooth', 0.045);
-    tone(460, 0.06, 'triangle', 0.035, 0.42);
-    tone(210, 0.08, 'square', 0.035, 0.86);
+    noise(0.045, 0.05);
+    tone(180, 0.055, 'square', 0.055, 0.02);
+    tone(520, 0.035, 'triangle', 0.04, 0.24);
+    noise(0.035, 0.045, 0.38);
+    tone(260, 0.05, 'sawtooth', 0.055, 0.7);
+    tone(900, 0.035, 'triangle', 0.04, 0.84);
   },
   magic(charged = false) {
     tone(charged ? 330 : 520, charged ? 0.22 : 0.12, 'sine', 0.055);
@@ -70,6 +80,11 @@ export const sounds = {
   ding() {
     tone(784, 0.16, 'sine', 0.08);
     tone(1175, 0.22, 'sine', 0.06, 0.08);
+  },
+  headshot() {
+    tone(1320, 0.08, 'triangle', 0.09);
+    tone(220, 0.12, 'square', 0.06, 0.02);
+    noise(0.055, 0.06, 0.01);
   },
 };
 

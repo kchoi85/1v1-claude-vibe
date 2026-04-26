@@ -50,7 +50,7 @@
         width: 28px;
         height: 28px;
         margin: -14px 0 0 -14px;
-        color: #ff4a4a;
+        color: #ffffff;
         opacity: 0;
         transform: scale(0.7);
         transition:
@@ -71,6 +71,22 @@
         height: 3px;
         transform: translate(-50%, -50%) rotate(-45deg);
       }
+      #hurt-flash {
+        position: absolute;
+        inset: 0;
+        border: 0 solid rgba(255, 42, 42, 0);
+        box-shadow: inset 0 0 0 rgba(255, 0, 0, 0);
+        opacity: 0;
+        transition:
+          opacity 180ms ease,
+          border-width 180ms ease,
+          box-shadow 180ms ease;
+      }
+      #hurt-flash.show {
+        border-width: 14px;
+        box-shadow: inset 0 0 44px rgba(255, 0, 0, 0.55);
+        opacity: 1;
+      }
       #score {
         position: absolute;
         top: 16px;
@@ -79,11 +95,11 @@
         display: flex;
         gap: 14px;
         align-items: center;
-        font-size: 26px;
+        font-size: 42px;
         font-weight: bold;
         letter-spacing: 2px;
         background: rgba(0, 0, 0, 0.4);
-        padding: 6px 18px;
+        padding: 10px 28px;
         border-radius: 6px;
       }
       #score .me {
@@ -207,6 +223,12 @@
         transform: translate(-50%, -50%);
         opacity: 1;
         white-space: nowrap;
+      }
+      .damage-number.headshot {
+        color: #ff4a4a;
+        text-shadow:
+          0 1px 0 #fff,
+          0 2px 12px rgba(255, 0, 0, 0.9);
       }
       #overlay {
         position: absolute;
@@ -377,6 +399,24 @@
         opacity: 0.4;
         cursor: not-allowed;
       }
+      #overlay .join-actions {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+      }
+      #overlay .icon-button {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        display: inline-grid;
+        place-items: center;
+      }
+      #overlay .icon-button svg {
+        width: 20px;
+        height: 20px;
+        stroke: currentColor;
+      }
       #overlay .class-card {
         padding: 0;
         border: 1px solid rgba(255, 255, 255, 0.16);
@@ -401,6 +441,7 @@
     <div id="hud">
       <div id="crosshair"></div>
       <div id="hit-x"></div>
+      <div id="hurt-flash"></div>
       <div id="score">
         <span class="me" id="score-me">0</span>
         <span class="sep">—</span>
@@ -446,7 +487,27 @@
             </button>
           </div>
           <br />
-          <button id="join-btn">Join match</button>
+          <div class="join-actions">
+            <button id="join-btn">Join match</button>
+            <button
+              id="fullscreen-join-btn"
+              class="icon-button"
+              type="button"
+              title="Join fullscreen"
+              aria-label="Join fullscreen"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" aria-hidden="true">
+                <path d="M8 3H3v5" />
+                <path d="M16 3h5v5" />
+                <path d="M8 21H3v-5" />
+                <path d="M16 21h5v-5" />
+                <path d="M3 3l6 6" />
+                <path d="M21 3l-6 6" />
+                <path d="M3 21l6-6" />
+                <path d="M21 21l-6-6" />
+              </svg>
+            </button>
+          </div>
           <div class="help">
             WASD move &middot; Shift sprint &middot; Space jump &middot; Ctrl crouch &middot; R
             reload &middot; Mouse look

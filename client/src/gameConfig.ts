@@ -25,7 +25,7 @@ export const ATTACK_CONFIG: Record<
   'gi-shot': { color: 0xffd45c, cooldown: 85, localAmmo: true, flash: 0xfff0a0 },
   'mage-shot': { color: 0x8df5ff, cooldown: 650, projectile: true, flash: 0x80f6ff },
   'mage-charged': { color: 0xff8df5, cooldown: 1100, projectile: true, flash: 0xffb3fb },
-  'assassin-slash': { color: 0xe8f6ff, cooldown: 420 },
+  'assassin-slash': { color: 0xe8f6ff, cooldown: 620 },
   'assassin-charged': { color: 0xff4f72, cooldown: 850 },
 };
 

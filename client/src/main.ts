@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
-import { buildArena } from './arena.js';
+import { buildArena, DEFAULT_MAP_SEED } from './arena.js';
 import { ensureAudio, playAttackSound, sounds } from './audio.js';
 import { makeWeapon } from './character.js';
 import { ATTACK_CONFIG, CLASS_MAX_HP, CLASS_MOVE, GI_GUN } from './gameConfig.js';
@@ -24,6 +24,7 @@ const playText = document.getElementById('play-text')!;
 const nameInput = document.getElementById('name-input') as HTMLInputElement;
 const nameErrorEl = document.getElementById('name-error')!;
 const joinBtn = document.getElementById('join-btn') as HTMLButtonElement;
+const fullscreenJoinBtn = document.getElementById('fullscreen-join-btn') as HTMLButtonElement;
 const statusEl = document.getElementById('status')!;
 const scoreMeEl = document.getElementById('score-me')!;
 const scoreOppEl = document.getElementById('score-opp')!;
@@ -33,6 +34,7 @@ const ammoCountEl = document.getElementById('ammo-count')!;
 const hpTextEl = document.getElementById('hp-text')!;
 const hpFillEl = document.getElementById('hp-fill') as HTMLDivElement;
 const hitXEl = document.getElementById('hit-x')!;
+const hurtFlashEl = document.getElementById('hurt-flash')!;
 const damageLayer = document.getElementById('damage-layer')!;
 const classCards = Array.from(document.querySelectorAll<HTMLButtonElement>('.class-card'));
 
@@ -54,28 +56,46 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
 scene.add(new THREE.HemisphereLight(0xfff7df, 0x6f8fa0, 0.72));
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(10, 20, 5);
 sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 60;
+sun.shadow.camera.left = -24;
+sun.shadow.camera.right = 24;
+sun.shadow.camera.top = 24;
+sun.shadow.camera.bottom = -24;
 scene.add(sun);
 
-const arena = buildArena(scene);
-const wallBoxes = arena.collisionBoxes;
+let arena = buildArena(scene, DEFAULT_MAP_SEED);
+let wallBoxes = arena.collisionBoxes;
+function setMapSeed(seed: number) {
+  scene.remove(arena.group);
+  arena = buildArena(scene, seed);
+  wallBoxes = arena.collisionBoxes;
+}
 
 const controls = new PointerLockControls(camera, renderer.domElement);
 scene.add(controls.getObject());
 
 controls.addEventListener('lock', () => overlay.classList.add('hidden'));
-controls.addEventListener('unlock', () => overlay.classList.remove('hidden'));
+controls.addEventListener('unlock', () => {
+  overlay.classList.remove('hidden');
+  clearGameplayInput();
+});
 
 const keys = {
   w: false,
   a: false,
   s: false,
   d: false,
+  q: false,
+  e: false,
   sprint: false,
   jump: false,
   crouch: false,
@@ -86,6 +106,8 @@ const gameplayKeyCodes = new Set([
   'KeyA',
   'KeyS',
   'KeyD',
+  'KeyQ',
+  'KeyE',
   'KeyR',
   'ShiftLeft',
   'ShiftRight',
@@ -93,41 +115,21 @@ const gameplayKeyCodes = new Set([
   'ControlLeft',
   'ControlRight',
 ]);
-const gameplayKeyLockCodes = [...gameplayKeyCodes];
-
-type KeyboardLockNavigator = Navigator & {
-  keyboard?: {
-    lock?: (keyCodes?: string[]) => Promise<void>;
-    unlock?: () => void;
-  };
-};
 
 function shouldCaptureGameplayKey(e: KeyboardEvent) {
   return hasJoined && gameplayKeyCodes.has(e.code);
 }
 
-async function enterGameplayMode() {
-  await requestGameplayFullscreen();
-  await lockGameplayKeyboard();
+function enterGameplayMode() {
   controls.lock();
 }
 
-async function requestGameplayFullscreen() {
-  if (document.fullscreenElement || !app.requestFullscreen) return;
+async function requestPageFullscreen() {
+  if (document.fullscreenElement || !document.documentElement.requestFullscreen) return;
   try {
-    await app.requestFullscreen({ navigationUI: 'hide' });
+    await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
   } catch {
-    // Fullscreen can be denied by the browser; pointer lock still works.
-  }
-}
-
-async function lockGameplayKeyboard() {
-  const keyboard = (navigator as KeyboardLockNavigator).keyboard;
-  if (!keyboard?.lock || !document.fullscreenElement) return;
-  try {
-    await keyboard.lock(gameplayKeyLockCodes);
-  } catch {
-    // Keyboard Lock is Chrome-only and requires fullscreen.
+    // Fullscreen is optional; the match still starts normally if the browser denies it.
   }
 }
 
@@ -154,6 +156,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyA') keys.a = true;
   if (e.code === 'KeyS') keys.s = true;
   if (e.code === 'KeyD') keys.d = true;
+  if (e.code === 'KeyQ') keys.q = true;
+  if (e.code === 'KeyE') keys.e = true;
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.sprint = true;
   if (e.code === 'KeyR') reloadWeapon();
   if (shouldCaptureGameplayKey(e)) e.preventDefault();
@@ -171,13 +175,11 @@ window.addEventListener('keyup', (e) => {
   if (e.code === 'KeyA') keys.a = false;
   if (e.code === 'KeyS') keys.s = false;
   if (e.code === 'KeyD') keys.d = false;
+  if (e.code === 'KeyQ') keys.q = false;
+  if (e.code === 'KeyE') keys.e = false;
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.sprint = false;
   if (e.code === 'Space') keys.jump = false;
   if (e.code === 'ControlLeft' || e.code === 'ControlRight') keys.crouch = false;
-});
-
-document.addEventListener('fullscreenchange', () => {
-  if (hasJoined && document.fullscreenElement) void lockGameplayKeyboard();
 });
 
 window.addEventListener('beforeunload', (e) => {
@@ -185,6 +187,21 @@ window.addEventListener('beforeunload', (e) => {
   e.preventDefault();
   e.returnValue = '';
 });
+
+function clearGameplayInput() {
+  keys.w = false;
+  keys.a = false;
+  keys.s = false;
+  keys.d = false;
+  keys.q = false;
+  keys.e = false;
+  keys.sprint = false;
+  keys.jump = false;
+  keys.crouch = false;
+  input.fireHeld = false;
+  input.aimHeld = false;
+  input.charging = false;
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -204,16 +221,19 @@ window.addEventListener('mouseup', (e) => {
 });
 
 const PLAYER_RADIUS = 0.4;
+const PLAYER_COLLISION_RADIUS = PLAYER_RADIUS * 2;
 const STAND_EYE = 1.7;
 const CROUCH_EYE = 1.0;
 const GRAVITY = 22;
 const JUMP_SPEED = 7;
+const ASSASSIN_JUMP_SPEED = 10.5;
 
 const player = {
   pos: new THREE.Vector3(0, 0, 5),
   vy: 0,
   eye: STAND_EYE,
   crouch: false,
+  lean: 0,
 };
 
 const localStats = {
@@ -233,6 +253,7 @@ const input = {
   chargeStart: 0,
   nextAttackAt: 0,
   lastGiShotAt: -Infinity,
+  giHeat: 0,
   reloadAnim: 0,
   localAnim: null as { kind: AttackKind; time: number } | null,
 };
@@ -288,6 +309,7 @@ function setViewWeapon(className: PlayerClass) {
 function moveWithCollision(pos: THREE.Vector3, dx: number, dz: number) {
   pos.x += dx;
   for (const b of wallBoxes) {
+    if (pos.y >= b.max.y - 0.05) continue;
     if (
       pos.x + PLAYER_RADIUS > b.min.x &&
       pos.x - PLAYER_RADIUS < b.max.x &&
@@ -299,6 +321,7 @@ function moveWithCollision(pos: THREE.Vector3, dx: number, dz: number) {
   }
   pos.z += dz;
   for (const b of wallBoxes) {
+    if (pos.y >= b.max.y - 0.05) continue;
     if (
       pos.x + PLAYER_RADIUS > b.min.x &&
       pos.x - PLAYER_RADIUS < b.max.x &&
@@ -310,6 +333,74 @@ function moveWithCollision(pos: THREE.Vector3, dx: number, dz: number) {
   }
 }
 
+function resolveWallOverlaps(pos: THREE.Vector3) {
+  for (const b of wallBoxes) {
+    if (pos.y >= b.max.y - 0.05) continue;
+    if (
+      pos.x + PLAYER_RADIUS <= b.min.x ||
+      pos.x - PLAYER_RADIUS >= b.max.x ||
+      pos.z + PLAYER_RADIUS <= b.min.z ||
+      pos.z - PLAYER_RADIUS >= b.max.z
+    ) {
+      continue;
+    }
+
+    const pushLeft = Math.abs(pos.x + PLAYER_RADIUS - b.min.x);
+    const pushRight = Math.abs(b.max.x - (pos.x - PLAYER_RADIUS));
+    const pushBack = Math.abs(pos.z + PLAYER_RADIUS - b.min.z);
+    const pushForward = Math.abs(b.max.z - (pos.z - PLAYER_RADIUS));
+    const minPush = Math.min(pushLeft, pushRight, pushBack, pushForward);
+
+    if (minPush === pushLeft) pos.x = b.min.x - PLAYER_RADIUS;
+    else if (minPush === pushRight) pos.x = b.max.x + PLAYER_RADIUS;
+    else if (minPush === pushBack) pos.z = b.min.z - PLAYER_RADIUS;
+    else pos.z = b.max.z + PLAYER_RADIUS;
+  }
+}
+
+function resolvePlayerCollisions(pos: THREE.Vector3) {
+  for (const other of lastPlayers) {
+    if (other.id === network.myId || other.hp <= 0) continue;
+    const dx = pos.x - other.px;
+    const dz = pos.z - other.pz;
+    const distSq = dx * dx + dz * dz;
+    if (distSq >= PLAYER_COLLISION_RADIUS * PLAYER_COLLISION_RADIUS) continue;
+
+    const dist = Math.sqrt(distSq);
+    if (dist > 0.001) {
+      const push = PLAYER_COLLISION_RADIUS - dist;
+      pos.x += (dx / dist) * push;
+      pos.z += (dz / dist) * push;
+    } else {
+      camera.getWorldDirection(tmpFwd);
+      tmpFwd.y = 0;
+      tmpFwd.normalize();
+      pos.x -= tmpFwd.x * PLAYER_COLLISION_RADIUS;
+      pos.z -= tmpFwd.z * PLAYER_COLLISION_RADIUS;
+    }
+  }
+  resolveWallOverlaps(pos);
+}
+
+function standingSurfaceY(pos: THREE.Vector3, previousY: number) {
+  let surface = 0;
+  if (player.vy > 0) return surface;
+  for (const box of wallBoxes) {
+    if (
+      pos.x + PLAYER_RADIUS <= box.min.x ||
+      pos.x - PLAYER_RADIUS >= box.max.x ||
+      pos.z + PLAYER_RADIUS <= box.min.z ||
+      pos.z - PLAYER_RADIUS >= box.max.z
+    ) {
+      continue;
+    }
+    if (previousY >= box.max.y - 0.05 && pos.y <= box.max.y + 0.12) {
+      surface = Math.max(surface, box.max.y);
+    }
+  }
+  return surface;
+}
+
 const network = new Network();
 const remotes = new RemotePlayers(scene);
 let myName = '';
@@ -318,11 +409,14 @@ let lastPlayers: PlayerState[] = [];
 network.onConnect = () => {
   statusEl.textContent = 'connected';
   joinBtn.disabled = false;
+  fullscreenJoinBtn.disabled = false;
 };
 network.onDisconnect = () => {
   statusEl.textContent = 'disconnected - start server: npm run dev:server';
   joinBtn.disabled = true;
+  fullscreenJoinBtn.disabled = true;
 };
+network.onMapSeed = (seed) => setMapSeed(seed);
 network.onState = (players) => {
   lastPlayers = players;
   const me = players.find((p) => p.id === network.myId);
@@ -350,6 +444,7 @@ network.onLeave = (id) => {
   renderPlayerList();
 };
 network.onSpawn = ({ x, z, ry }) => {
+  clearPersistentHitEffects();
   player.pos.set(x, 0, z);
   player.vy = 0;
   player.eye = STAND_EYE;
@@ -360,19 +455,22 @@ network.onSpawn = ({ x, z, ry }) => {
 };
 network.onAttack = (effect) => {
   drawAttack(effect);
+  if (effect.sound !== false) playAttackSound(effect.kind);
   if (effect.attackerId !== network.myId) {
     remotes.playAttack(effect.attackerId, effect.kind);
-    playAttackSound(effect.kind);
   }
   if (effect.attackerId === network.myId) playLocalAttack(effect.kind);
 };
 network.onDamage = (event) => {
   showDamageNumber(event);
+  addHitEffects(event);
+  if (event.headshot) sounds.headshot();
   if (event.attackerId === network.myId) showHitX();
   if (event.targetId === network.myId) {
     localStats.hp = event.hp;
     localStats.maxHp = event.maxHp;
     renderHp();
+    showHurtFlash();
   }
 };
 network.onReloaded = (ammo) => {
@@ -410,8 +508,9 @@ function renderHp() {
 }
 
 joinBtn.disabled = true;
+fullscreenJoinBtn.disabled = true;
 
-function attemptJoin() {
+async function attemptJoin(options: { fullscreen?: boolean } = {}) {
   const raw = nameInput.value.trim().slice(0, 16);
   if (!raw) {
     showNameError(nameInput, nameErrorEl, 'Name is required');
@@ -421,6 +520,7 @@ function attemptJoin() {
   clearNameError(nameInput, nameErrorEl);
   myName = raw;
   if (!network.ws || network.ws.readyState !== WebSocket.OPEN) return;
+  if (options.fullscreen) await requestPageFullscreen();
   localStats.className = selectedClass;
   setViewWeapon(selectedClass);
   network.sendJoin(myName, selectedClass);
@@ -428,12 +528,13 @@ function attemptJoin() {
   nameForm.style.display = 'none';
   playText.style.display = 'block';
   overlayPanel.classList.add('clickable');
-  void enterGameplayMode();
+  enterGameplayMode();
 }
 
-joinBtn.addEventListener('click', attemptJoin);
+joinBtn.addEventListener('click', () => void attemptJoin());
+fullscreenJoinBtn.addEventListener('click', () => void attemptJoin({ fullscreen: true }));
 nameInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') attemptJoin();
+  if (e.key === 'Enter') void attemptJoin();
 });
 nameInput.addEventListener('input', () => {
   if (!nameInput.value.trim()) return;
@@ -441,7 +542,7 @@ nameInput.addEventListener('input', () => {
 });
 
 overlay.addEventListener('click', () => {
-  if (hasJoined) void enterGameplayMode();
+  if (hasJoined) enterGameplayMode();
 });
 
 network.connect('ws://localhost:8080');
@@ -454,6 +555,7 @@ function beginPrimary() {
   } else if (localStats.className === 'mage') {
     fireAttack('mage-shot');
   } else {
+    input.fireHeld = true;
     fireAttack('assassin-slash');
   }
 }
@@ -501,16 +603,11 @@ function fireAttack(kind: AttackKind, charge = 0) {
   input.nextAttackAt = now + config.cooldown;
   if (kind === 'gi-shot') input.lastGiShotAt = now;
   if (config.localAmmo) {
+    input.giHeat = Math.min(1, input.giHeat + 0.08);
     localStats.ammo = Math.max(0, localStats.ammo - 1);
     renderAmmo();
-    sounds.giShot();
-    sounds.caseDrop();
     dropBulletCase();
     if (localStats.ammo <= 0) setTimeout(reloadWeapon, 80);
-  } else if (kind === 'mage-shot' || kind === 'mage-charged') {
-    sounds.magic(kind === 'mage-charged');
-  } else {
-    sounds.slash();
   }
 
   const origin = new THREE.Vector3();
@@ -525,7 +622,8 @@ function fireAttack(kind: AttackKind, charge = 0) {
 }
 
 function applyGiSpread(direction: THREE.Vector3) {
-  const spread = input.aimHeld ? GI_GUN.aimedSpreadRad : GI_GUN.spreadRad;
+  const heatSpread = GI_GUN.spreadRad * (1 + input.giHeat * 2.2);
+  const spread = input.aimHeld ? GI_GUN.aimedSpreadRad * (1 + input.giHeat) : heatSpread;
   const yaw = (Math.random() * 2 - 1) * spread;
   const pitch = (Math.random() * 2 - 1) * spread;
   const right = new THREE.Vector3().crossVectors(direction, UP).normalize();
@@ -781,6 +879,50 @@ function drawAttack(effect: AttackEffect) {
   if (ATTACK_CONFIG[effect.kind].projectile) {
     addMagicTrail(origin, end, effect.kind === 'mage-charged');
   }
+
+  if (effect.kind === 'gi-shot' && (effect.hit || effect.blocked)) {
+    addBulletHole(end, new THREE.Vector3(effect.dx, effect.dy, effect.dz).normalize());
+  }
+}
+
+const persistentEffects: THREE.Object3D[] = [];
+
+function addBulletHole(point: THREE.Vector3, dir: THREE.Vector3) {
+  const hole = new THREE.Mesh(
+    new THREE.CircleGeometry(0.09, 14),
+    new THREE.MeshBasicMaterial({
+      color: 0x111111,
+      transparent: true,
+      opacity: 0.78,
+      side: THREE.DoubleSide,
+    }),
+  );
+  hole.position.copy(point).addScaledVector(dir, -0.012);
+  hole.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().negate());
+  scene.add(hole);
+  persistentEffects.push(hole);
+}
+
+function addHitEffects(event: DamageEvent) {
+  const point = new THREE.Vector3(event.hx, event.hy, event.hz);
+  remotes.addHitMark(event.targetId, point, event.headshot);
+  const puff = new THREE.Mesh(
+    new THREE.SphereGeometry(event.headshot ? 0.16 : 0.11, 10, 8),
+    new THREE.MeshBasicMaterial({
+      color: event.headshot ? 0xff1f1f : 0x8b0000,
+      transparent: true,
+      opacity: 0.75,
+    }),
+  );
+  puff.position.copy(point);
+  scene.add(puff);
+  timedObjects.push({ obj: puff, life: 0.28, maxLife: 0.28 });
+}
+
+function clearPersistentHitEffects() {
+  for (const obj of persistentEffects) scene.remove(obj);
+  persistentEffects.length = 0;
+  remotes.clearHitMarks();
 }
 
 function addMagicTrail(origin: THREE.Vector3, end: THREE.Vector3, charged: boolean) {
@@ -853,11 +995,17 @@ type DamageMarker = {
 const damageMarkers: DamageMarker[] = [];
 
 function showDamageNumber(event: DamageEvent) {
-  const activeForTarget = damageMarkers.filter(
-    (m) => m.targetId === event.targetId && m.age < 0.55,
-  ).length;
+  const markersForTarget = damageMarkers.filter((m) => m.targetId === event.targetId);
+  while (markersForTarget.length >= 5) {
+    const oldest = markersForTarget.shift();
+    if (!oldest) break;
+    oldest.el.remove();
+    const index = damageMarkers.indexOf(oldest);
+    if (index >= 0) damageMarkers.splice(index, 1);
+  }
+  const activeForTarget = markersForTarget.filter((m) => m.age < 0.55).length;
   const el = document.createElement('div');
-  el.className = 'damage-number';
+  el.className = `damage-number${event.headshot ? ' headshot' : ''}`;
   el.textContent = `-${event.amount}`;
   damageLayer.appendChild(el);
   damageMarkers.push({
@@ -896,6 +1044,12 @@ function showHitX() {
   hitXEl.classList.add('show');
 }
 
+let hurtTimer = 0;
+function showHurtFlash() {
+  hurtTimer = 0.28;
+  hurtFlashEl.classList.add('show');
+}
+
 const SEND_HZ = 20;
 let lastSent = 0;
 const tmpFwd = new THREE.Vector3();
@@ -909,6 +1063,8 @@ function tick() {
 
   if (controls.isLocked) {
     player.crouch = keys.crouch;
+    const targetLean = keys.q && !keys.e ? -1 : keys.e && !keys.q ? 1 : 0;
+    player.lean += (targetLean - player.lean) * (1 - Math.exp(-dt * 12));
 
     let fwd = 0;
     let strafe = 0;
@@ -935,15 +1091,21 @@ function tick() {
       const dz = (tmpFwd.z * fwd + tmpRight.z * strafe) * speed * dt;
       moveWithCollision(player.pos, dx, dz);
     }
+    resolvePlayerCollisions(player.pos);
 
-    const grounded = player.pos.y <= 0.0001 && player.vy <= 0;
+    const currentSurfaceY =
+      localStats.className === 'assassin' ? standingSurfaceY(player.pos, player.pos.y) : 0;
+    const grounded = player.pos.y <= currentSurfaceY + 0.0001 && player.vy <= 0;
     if (grounded && keys.jump && !player.crouch) {
-      player.vy = JUMP_SPEED;
+      player.vy = localStats.className === 'assassin' ? ASSASSIN_JUMP_SPEED : JUMP_SPEED;
     }
+    const previousY = player.pos.y;
     player.vy -= GRAVITY * dt;
     player.pos.y += player.vy * dt;
-    if (player.pos.y < 0) {
-      player.pos.y = 0;
+    const surfaceY =
+      localStats.className === 'assassin' ? standingSurfaceY(player.pos, previousY) : 0;
+    if (player.pos.y < surfaceY) {
+      player.pos.y = surfaceY;
       player.vy = 0;
     }
 
@@ -964,10 +1126,15 @@ function tick() {
     player.pos.x = obj.position.x;
     player.pos.z = obj.position.z;
     obj.position.y = player.pos.y + player.eye;
+    camera.rotation.z += (player.lean * -0.13 - camera.rotation.z) * (1 - Math.exp(-dt * 14));
+  } else {
+    camera.rotation.z += (0 - camera.rotation.z) * (1 - Math.exp(-dt * 14));
   }
 
-  if (input.fireHeld && localStats.className === 'gi' && controls.isLocked) {
-    fireAttack('gi-shot');
+  input.giHeat = Math.max(0, input.giHeat - dt * 0.75);
+  if (input.fireHeld && controls.isLocked) {
+    if (localStats.className === 'gi') fireAttack('gi-shot');
+    if (localStats.className === 'assassin') fireAttack('assassin-slash');
   }
 
   const targetFov = input.aimHeld && localStats.className === 'gi' ? 50 : 75;
@@ -983,6 +1150,10 @@ function tick() {
     hitXTimer -= dt;
     if (hitXTimer <= 0) hitXEl.classList.remove('show');
   }
+  if (hurtTimer > 0) {
+    hurtTimer -= dt;
+    if (hurtTimer <= 0) hurtFlashEl.classList.remove('show');
+  }
 
   const now = performance.now();
   if (now - lastSent > 1000 / SEND_HZ) {
@@ -993,6 +1164,7 @@ function tick() {
       player.pos.z,
       camera.rotation.y,
       camera.rotation.x,
+      player.lean,
       player.crouch,
     );
   }
