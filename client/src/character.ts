@@ -1,11 +1,14 @@
 import * as THREE from 'three';
+import type { PlayerClass } from './types.js';
 
 export interface Character {
   group: THREE.Group;
   head: THREE.Group;
+  weapon: THREE.Group;
+  rightArm: THREE.Mesh;
 }
 
-export function makeCharacter(bodyColor: number): Character {
+export function makeCharacter(bodyColor: number, className: PlayerClass = 'gi'): Character {
   const group = new THREE.Group();
 
   const skin = 0xffd9b3;
@@ -67,5 +70,112 @@ export function makeCharacter(bodyColor: number): Character {
   visor.position.set(0, 0.23, -0.18);
   head.add(visor);
 
-  return { group, head };
+  const weapon = makeWeapon(className);
+  weapon.position.set(0.46, 1.08, -0.28);
+  weapon.rotation.set(0.08, -0.2, -0.12);
+  group.add(weapon);
+
+  return { group, head, weapon, rightArm: rArm };
+}
+
+export function makeWeapon(className: PlayerClass): THREE.Group {
+  if (className === 'mage') return makeWand();
+  if (className === 'assassin') return makeDagger();
+  return makeGun();
+}
+
+function makeGun(): THREE.Group {
+  const gun = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0x1a2430, roughness: 0.55, metalness: 0.35 });
+  const gripMat = new THREE.MeshStandardMaterial({ color: 0x111416, roughness: 0.7 });
+  const barrelMat = new THREE.MeshStandardMaterial({ color: 0x56606a, roughness: 0.35, metalness: 0.55 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.56), metal);
+  body.position.z = -0.16;
+  gun.add(body);
+
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.58, 12), barrelMat);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.02, -0.58);
+  gun.add(barrel);
+
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.24), metal);
+  stock.position.set(0, 0.02, 0.24);
+  gun.add(stock);
+
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.26, 0.12), gripMat);
+  grip.position.set(0, -0.18, 0.03);
+  grip.rotation.x = -0.25;
+  gun.add(grip);
+
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.28, 0.14), gripMat);
+  mag.position.set(0, -0.2, -0.17);
+  mag.rotation.x = 0.08;
+  gun.add(mag);
+
+  gun.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) obj.castShadow = true;
+  });
+  return gun;
+}
+
+function makeWand(): THREE.Group {
+  const wand = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x5a341d, roughness: 0.75 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xcaa85c, metalness: 0.35, roughness: 0.35 });
+  const orb = new THREE.MeshStandardMaterial({
+    color: 0x7be7ff,
+    emissive: 0x4ecfff,
+    emissiveIntensity: 1.5,
+    transparent: true,
+    opacity: 0.9,
+  });
+
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.82, 10), wood);
+  shaft.rotation.x = Math.PI / 2;
+  shaft.position.z = -0.22;
+  wand.add(shaft);
+
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.01, 8, 18), gold);
+  band.position.z = -0.66;
+  wand.add(band);
+
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.095, 18, 18), orb);
+  glow.position.z = -0.74;
+  wand.add(glow);
+
+  const light = new THREE.PointLight(0x7be7ff, 0.45, 2);
+  light.position.z = -0.74;
+  wand.add(light);
+
+  wand.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) obj.castShadow = true;
+  });
+  return wand;
+}
+
+function makeDagger(): THREE.Group {
+  const dagger = new THREE.Group();
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xcfd8df, metalness: 0.65, roughness: 0.25 });
+  const handleMat = new THREE.MeshStandardMaterial({ color: 0x17181c, roughness: 0.65 });
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0x8d7f5b, metalness: 0.45, roughness: 0.3 });
+
+  const blade = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.52, 4), bladeMat);
+  blade.rotation.x = -Math.PI / 2;
+  blade.position.z = -0.36;
+  dagger.add(blade);
+
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.3, 10), handleMat);
+  handle.rotation.x = Math.PI / 2;
+  handle.position.z = -0.02;
+  dagger.add(handle);
+
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.055, 0.055), guardMat);
+  guard.position.z = -0.19;
+  dagger.add(guard);
+
+  dagger.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) obj.castShadow = true;
+  });
+  return dagger;
 }

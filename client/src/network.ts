@@ -1,6 +1,15 @@
-import type { ClientMessage, PlayerState, ServerMessage } from './types.js';
+import type {
+  AttackEffect,
+  AttackKind,
+  DamageEvent,
+  ClientMessage,
+  PlayerClass,
+  PlayerState,
+  ServerMessage,
+} from './types.js';
 
 export type SpawnInfo = { x: number; z: number; ry: number };
+type VecLike = { x: number; y: number; z: number };
 
 export class Network {
   ws: WebSocket | null = null;
@@ -10,6 +19,9 @@ export class Network {
   onConnect?: () => void;
   onDisconnect?: () => void;
   onSpawn?: (info: SpawnInfo) => void;
+  onAttack?: (effect: AttackEffect) => void;
+  onDamage?: (event: DamageEvent) => void;
+  onReloaded?: (ammo: number) => void;
 
   connect(url: string) {
     const ws = new WebSocket(url);
@@ -35,18 +47,42 @@ export class Network {
         this.onState?.(msg.players);
       } else if (msg.t === 'spawn') {
         this.onSpawn?.({ x: msg.x, z: msg.z, ry: msg.ry });
+      } else if (msg.t === 'attack') {
+        this.onAttack?.(msg.effect);
+      } else if (msg.t === 'damage') {
+        this.onDamage?.(msg.event);
+      } else if (msg.t === 'reloaded') {
+        this.onReloaded?.(msg.ammo);
       } else if (msg.t === 'leave') {
         this.onLeave?.(msg.id);
       }
     };
   }
 
-  sendJoin(name: string) {
-    this.send({ t: 'join', name });
+  sendJoin(name: string, className: PlayerClass) {
+    this.send({ t: 'join', name, className });
   }
 
   sendInput(px: number, py: number, pz: number, ry: number, rx: number, crouch: boolean) {
     this.send({ t: 'input', px, py, pz, ry, rx, crouch });
+  }
+
+  sendAttack(kind: AttackKind, origin: VecLike, direction: VecLike, charge = 0) {
+    this.send({
+      t: 'attack',
+      kind,
+      ox: origin.x,
+      oy: origin.y,
+      oz: origin.z,
+      dx: direction.x,
+      dy: direction.y,
+      dz: direction.z,
+      charge,
+    });
+  }
+
+  sendReload() {
+    this.send({ t: 'reload' });
   }
 
   private send(msg: ClientMessage) {
