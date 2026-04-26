@@ -62,7 +62,9 @@ export function makeCharacter(bodyColor: number): Character {
       emissiveIntensity: 0.6,
     }),
   );
-  visor.position.set(0, 0.23, 0.18);
+  // Visor faces -Z so the model's forward matches the Three.js camera convention
+  // (camera looks down -Z). Without this, body yaw and head pitch render mirrored.
+  visor.position.set(0, 0.23, -0.18);
   head.add(visor);
 
   return { group, head };
