@@ -29,6 +29,7 @@ type HitMark = {
 
 const STAND_SCALE = 1;
 const CROUCH_SCALE = 0.65;
+const PEEK_OFFSET = 0.48;
 const WEAPON_BASE_POS = new THREE.Vector3(0.46, 1.08, -0.28);
 const WEAPON_BASE_ROT = new THREE.Euler(0.08, -0.2, -0.12);
 
@@ -121,8 +122,14 @@ export class RemotePlayers {
       g.position.z += (r.target.z - g.position.z) * a;
       g.rotation.y += shortestAngle(g.rotation.y, r.target.ry) * a;
       g.rotation.z += (r.target.lean * -0.16 - g.rotation.z) * a;
+      const peekX = Math.cos(g.rotation.y) * r.target.lean * PEEK_OFFSET;
+      const peekZ = -Math.sin(g.rotation.y) * r.target.lean * PEEK_OFFSET;
 
       r.char.head.rotation.x += (r.target.rx - r.char.head.rotation.x) * a;
+      r.char.head.position.x += (peekX - r.char.head.position.x) * a;
+      r.char.head.position.z += (peekZ - r.char.head.position.z) * a;
+      r.char.weapon.position.x += (WEAPON_BASE_POS.x + peekX - r.char.weapon.position.x) * a;
+      r.char.weapon.position.z += (WEAPON_BASE_POS.z + peekZ - r.char.weapon.position.z) * a;
 
       const targetScale = r.target.crouch ? CROUCH_SCALE : STAND_SCALE;
       g.scale.y += (targetScale - g.scale.y) * a;
@@ -148,7 +155,11 @@ export class RemotePlayers {
         const p = Math.max(0, r.attackAnim.time / 0.18);
         const aimRot = weaponAimRotation(r.target.rx);
         if (r.attackAnim.kind === 'assassin-slash' || r.attackAnim.kind === 'assassin-charged') {
-          r.char.weapon.position.copy(WEAPON_BASE_POS);
+          r.char.weapon.position.set(
+            WEAPON_BASE_POS.x + peekX,
+            WEAPON_BASE_POS.y,
+            WEAPON_BASE_POS.z + peekZ,
+          );
           r.char.weapon.rotation.set(
             aimRot.x - 0.12,
             aimRot.y - 0.7 * Math.sin((1 - p) * Math.PI),
@@ -156,9 +167,9 @@ export class RemotePlayers {
           );
         } else {
           r.char.weapon.position.set(
-            WEAPON_BASE_POS.x,
+            WEAPON_BASE_POS.x + peekX,
             WEAPON_BASE_POS.y,
-            WEAPON_BASE_POS.z + 0.14 * Math.sin((1 - p) * Math.PI),
+            WEAPON_BASE_POS.z + peekZ + 0.14 * Math.sin((1 - p) * Math.PI),
           );
           r.char.weapon.rotation.copy(aimRot);
         }
@@ -166,7 +177,7 @@ export class RemotePlayers {
           r.attackAnim = null;
         }
       } else {
-        r.char.weapon.position.lerp(WEAPON_BASE_POS, a);
+        r.char.weapon.position.y += (WEAPON_BASE_POS.y - r.char.weapon.position.y) * a;
         r.char.weapon.rotation.x +=
           (weaponAimRotation(r.target.rx).x - r.char.weapon.rotation.x) * a;
         r.char.weapon.rotation.y += (WEAPON_BASE_ROT.y - r.char.weapon.rotation.y) * a;

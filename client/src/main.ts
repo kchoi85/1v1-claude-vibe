@@ -250,6 +250,7 @@ window.addEventListener('mouseup', (e) => {
 
 const PLAYER_RADIUS = 0.4;
 const PLAYER_COLLISION_RADIUS = PLAYER_RADIUS * 2;
+const PEEK_OFFSET = 0.48;
 const STAND_EYE = 1.7;
 const CROUCH_EYE = 1.0;
 const GRAVITY = 22;
@@ -258,6 +259,7 @@ const ASSASSIN_JUMP_SPEED = 10.5;
 
 const player = {
   pos: new THREE.Vector3(0, 0, 5),
+  viewPos: new THREE.Vector3(0, 0, 5),
   vy: 0,
   eye: STAND_EYE,
   crouch: false,
@@ -298,6 +300,7 @@ const movement = {
   cycle: 0,
   footstepTimer: 0,
   wallAvoidance: 0,
+  wallPitch: 0,
 };
 
 const ATTACK_CAMERA_KICK: Record<
@@ -417,6 +420,21 @@ function resolvePlayerCollisions(pos: THREE.Vector3) {
     }
   }
   resolveWallOverlaps(pos);
+}
+
+function collidesWithWalls(pos: THREE.Vector3, radius = PLAYER_RADIUS) {
+  for (const b of wallBoxes) {
+    if (pos.y >= b.max.y - 0.05) continue;
+    if (
+      pos.x + radius > b.min.x &&
+      pos.x - radius < b.max.x &&
+      pos.z + radius > b.min.z &&
+      pos.z - radius < b.max.z
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function standingSurfaceY(pos: THREE.Vector3, previousY: number) {
@@ -638,6 +656,7 @@ async function copySessionLink() {
 type ChatMessage = { name: string; text: string };
 const chatMessages: ChatMessage[] = [];
 let chatFadeTimer: ReturnType<typeof setTimeout> | null = null;
+const chatNameColors = ['#6cf', '#ff9f68', '#b692f6', '#95d475', '#ff8fb1', '#ffd166'];
 
 function openChat() {
   chatEl.classList.add('visible', 'active');
@@ -671,11 +690,18 @@ function renderChatMessages() {
       line.className = 'chat-line';
       const name = document.createElement('span');
       name.className = 'name';
+      name.style.color = chatNameColor(msg.name);
       name.textContent = `${msg.name}: `;
       line.append(name, document.createTextNode(msg.text));
       return line;
     }),
   );
+}
+
+function chatNameColor(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return chatNameColors[Math.abs(hash) % chatNameColors.length];
 }
 
 function scheduleChatFade() {
@@ -787,7 +813,7 @@ function fireAttack(kind: AttackKind, charge = 0) {
   }
 
   const origin = new THREE.Vector3();
-  const visualOrigin = getWeaponTipWorld();
+  const visualOrigin = getWeaponTipWorld(false);
   const direction = new THREE.Vector3();
   camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
@@ -852,14 +878,18 @@ function applyAttackCameraKick(kind: Exclude<AttackKind, 'gi-shot'>) {
   recoil.yaw = THREE.MathUtils.clamp(recoil.yaw + yawKick, -kick.recoverYaw, kick.recoverYaw);
 }
 
-function getWeaponTipWorld(): THREE.Vector3 {
+function getWeaponTipWorld(applyWallAvoidance = true): THREE.Vector3 {
   if (!viewWeapon) return camera.getWorldPosition(new THREE.Vector3());
+  const originalZ = viewWeapon.position.z;
+  if (!applyWallAvoidance) viewWeapon.position.z -= movement.wallAvoidance * 0.35;
   const tipByClass: Record<PlayerClass, THREE.Vector3> = {
     gi: new THREE.Vector3(0, 0.02, -0.9),
     mage: new THREE.Vector3(0, 0, -0.78),
     assassin: new THREE.Vector3(0, 0, -0.66),
   };
-  return viewWeapon.localToWorld(tipByClass[localStats.className].clone());
+  const tip = viewWeapon.localToWorld(tipByClass[localStats.className].clone());
+  viewWeapon.position.z = originalZ;
+  return tip;
 }
 
 function playLocalAttack(kind: AttackKind) {
@@ -891,9 +921,13 @@ function updateWeaponAnimation(dt: number) {
   if (movement.wallAvoidance > 0) {
     const avoid = movement.wallAvoidance;
     basePos.x -= avoid * 0.08;
-    basePos.y -= avoid * 0.12;
-    basePos.z += avoid * 0.4;
-    baseRot = new THREE.Euler(baseRot.x - avoid * 0.28, baseRot.y + avoid * 0.16, baseRot.z);
+    basePos.y += avoid * movement.wallPitch * 0.18;
+    basePos.z += avoid * 0.58;
+    baseRot = new THREE.Euler(
+      baseRot.x + avoid * movement.wallPitch * 0.42,
+      baseRot.y + avoid * 0.16,
+      baseRot.z,
+    );
   }
   const magazine = viewWeapon.getObjectByName('magazine');
 
@@ -1303,7 +1337,19 @@ function weaponWallAvoidance() {
     if (dist < nearest) nearest = dist;
   }
   if (!Number.isFinite(nearest)) return 0;
-  return THREE.MathUtils.clamp((0.95 - nearest) / 0.55, 0, 1);
+  const avoid = THREE.MathUtils.clamp((1.25 - nearest) / 0.75, 0, 1);
+  movement.wallPitch = tmpRay.direction.y > 0.08 ? 1 : tmpRay.direction.y < -0.08 ? -1 : 0;
+  return avoid;
+}
+
+function allowedPeekLean(desiredLean: number) {
+  if (desiredLean === 0) return 0;
+  camera.getWorldDirection(tmpFwd);
+  tmpFwd.y = 0;
+  tmpFwd.normalize();
+  tmpRight.crossVectors(tmpFwd, UP).normalize();
+  const peekPos = player.pos.clone().addScaledVector(tmpRight, desiredLean * PEEK_OFFSET);
+  return collidesWithWalls(peekPos, PLAYER_RADIUS * 0.9) ? 0 : desiredLean;
 }
 
 function tick() {
@@ -1316,7 +1362,8 @@ function tick() {
 
   if (controls.isLocked) {
     player.crouch = keys.crouch;
-    const targetLean = keys.q && !keys.e ? -1 : keys.e && !keys.q ? 1 : 0;
+    const desiredLean = keys.q && !keys.e ? -1 : keys.e && !keys.q ? 1 : 0;
+    const targetLean = allowedPeekLean(desiredLean);
     player.lean += (targetLean - player.lean) * (1 - Math.exp(-dt * 12));
 
     let fwd = 0;
@@ -1370,18 +1417,22 @@ function tick() {
     const eyeAlpha = 1 - Math.exp(-dt * 14);
     player.eye += (targetEye - player.eye) * eyeAlpha;
 
+    camera.getWorldDirection(tmpFwd);
+    tmpFwd.y = 0;
+    tmpFwd.normalize();
+    tmpRight.crossVectors(tmpFwd, UP).normalize();
+    player.viewPos.copy(player.pos).addScaledVector(tmpRight, player.lean * PEEK_OFFSET);
+
     obj.position.x = THREE.MathUtils.clamp(
-      player.pos.x,
+      player.viewPos.x,
       arena.bounds.minX + PLAYER_RADIUS,
       arena.bounds.maxX - PLAYER_RADIUS,
     );
     obj.position.z = THREE.MathUtils.clamp(
-      player.pos.z,
+      player.viewPos.z,
       arena.bounds.minZ + PLAYER_RADIUS,
       arena.bounds.maxZ - PLAYER_RADIUS,
     );
-    player.pos.x = obj.position.x;
-    player.pos.z = obj.position.z;
     obj.position.y = player.pos.y + player.eye;
     camera.rotation.z += (player.lean * -0.13 - camera.rotation.z) * (1 - Math.exp(-dt * 14));
     movement.wallAvoidance = weaponWallAvoidance();
