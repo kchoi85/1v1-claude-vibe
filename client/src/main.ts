@@ -265,6 +265,14 @@ const recoil = {
   weaponKick: 0,
 };
 
+const movement = {
+  amount: 0,
+  running: false,
+  cycle: 0,
+  footstepTimer: 0,
+  wallAvoidance: 0,
+};
+
 const ATTACK_CAMERA_KICK: Record<
   Exclude<AttackKind, 'gi-shot'>,
   { pitch: number; yaw: number; recoverPitch: number; recoverYaw: number }
@@ -465,7 +473,11 @@ network.onSpawn = ({ x, z, ry }) => {
   obj.position.set(x, player.eye, z);
 };
 network.onAttack = (effect) => {
-  drawAttack(effect);
+  const remoteOrigin =
+    effect.attackerId !== network.myId
+      ? remotes.weaponTipWorld(effect.attackerId, effect.className)
+      : null;
+  drawAttack(effect, remoteOrigin ?? undefined);
   if (effect.sound !== false) playAttackSound(effect.kind);
   if (effect.attackerId !== network.myId) {
     remotes.playAttack(effect.attackerId, effect.kind);
@@ -661,6 +673,9 @@ function fireAttack(kind: AttackKind, charge = 0) {
   if (now < input.nextAttackAt) return;
   if (config.localAmmo && (localStats.ammo <= 0 || localStats.reloading)) return;
   const isSettledGiShot = kind === 'gi-shot' && now - input.lastGiShotAt >= GI_GUN.firstShotResetMs;
+  const movingGiShot =
+    kind === 'gi-shot' && (movement.amount > 0.12 || keys.w || keys.a || keys.s || keys.d);
+  const shouldSpreadGiShot = kind === 'gi-shot' && (!isSettledGiShot || movingGiShot);
   input.nextAttackAt = now + config.cooldown;
   if (kind === 'gi-shot') input.lastGiShotAt = now;
   if (config.localAmmo) {
@@ -676,7 +691,7 @@ function fireAttack(kind: AttackKind, charge = 0) {
   const direction = new THREE.Vector3();
   camera.getWorldPosition(origin);
   camera.getWorldDirection(direction);
-  if (kind === 'gi-shot' && !isSettledGiShot) applyGiSpread(direction);
+  if (shouldSpreadGiShot) applyGiSpread(direction);
   network.sendAttack(kind, origin, direction, charge, visualOrigin);
   if (kind === 'gi-shot' && !isSettledGiShot) applyGiRecoil();
   if (kind !== 'gi-shot') applyAttackCameraKick(kind);
@@ -757,11 +772,29 @@ function playLocalAttack(kind: AttackKind) {
 function updateWeaponAnimation(dt: number) {
   if (!viewWeapon) return;
   const basePos = new THREE.Vector3(0.36, -0.28, -0.62);
+  let baseRot = new THREE.Euler(-0.05, -0.22, -0.08);
   if (localStats.className === 'gi') {
     basePos.y -= recoil.weaponKick * 0.025;
     basePos.z += recoil.weaponKick * 0.1;
   }
-  const baseRot = new THREE.Euler(-0.05, -0.22, -0.08);
+  if (movement.amount > 0.01) {
+    const bob = movement.running ? 1 : 0.6;
+    basePos.x += Math.sin(movement.cycle) * 0.025 * bob * movement.amount;
+    basePos.y += Math.abs(Math.cos(movement.cycle)) * 0.024 * bob * movement.amount;
+    basePos.z += Math.cos(movement.cycle * 0.5) * 0.018 * bob * movement.amount;
+    baseRot = new THREE.Euler(
+      baseRot.x + Math.cos(movement.cycle * 2) * 0.012 * bob * movement.amount,
+      baseRot.y,
+      baseRot.z + Math.sin(movement.cycle) * 0.04 * bob * movement.amount,
+    );
+  }
+  if (movement.wallAvoidance > 0) {
+    const avoid = movement.wallAvoidance;
+    basePos.x -= avoid * 0.08;
+    basePos.y -= avoid * 0.12;
+    basePos.z += avoid * 0.4;
+    baseRot = new THREE.Euler(baseRot.x - avoid * 0.28, baseRot.y + avoid * 0.16, baseRot.z);
+  }
   const magazine = viewWeapon.getObjectByName('magazine');
 
   if (input.reloadAnim > 0 && localStats.className === 'gi') {
@@ -888,8 +921,8 @@ function dropMagazine() {
   });
 }
 
-function drawAttack(effect: AttackEffect) {
-  const origin = new THREE.Vector3(effect.ox, effect.oy, effect.oz);
+function drawAttack(effect: AttackEffect, originOverride?: THREE.Vector3) {
+  const origin = originOverride ?? new THREE.Vector3(effect.ox, effect.oy, effect.oz);
   const end = new THREE.Vector3(effect.ex, effect.ey, effect.ez);
   const color = ATTACK_CONFIG[effect.kind].color;
 
@@ -1154,12 +1187,32 @@ const SEND_HZ = 20;
 let lastSent = 0;
 const tmpFwd = new THREE.Vector3();
 const tmpRight = new THREE.Vector3();
+const tmpRay = new THREE.Ray();
+const tmpHit = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const clock = new THREE.Clock();
+
+function weaponWallAvoidance() {
+  const origin = camera.getWorldPosition(tmpRay.origin);
+  camera.getWorldDirection(tmpRay.direction);
+  let nearest = Infinity;
+  for (const box of wallBoxes) {
+    const hit = tmpRay.intersectBox(box, tmpHit);
+    if (!hit) continue;
+    const dist = origin.distanceTo(hit);
+    if (dist < nearest) nearest = dist;
+  }
+  if (!Number.isFinite(nearest)) return 0;
+  return THREE.MathUtils.clamp((0.95 - nearest) / 0.55, 0, 1);
+}
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const obj = controls.getObject();
+  let frameMoveAmount = 0;
+  let frameRunning = false;
+  let frameSpeed = 0;
+  let frameGrounded = false;
 
   if (controls.isLocked) {
     player.crouch = keys.crouch;
@@ -1181,6 +1234,9 @@ function tick() {
       const sprintMult = keys.sprint && !player.crouch ? move.sprint : 1;
       const crouchMult = player.crouch ? 0.55 : 1;
       const speed = move.walk * sprintMult * crouchMult;
+      frameMoveAmount = 1;
+      frameRunning = sprintMult > 1.05;
+      frameSpeed = speed;
 
       camera.getWorldDirection(tmpFwd);
       tmpFwd.y = 0;
@@ -1196,6 +1252,7 @@ function tick() {
     const currentSurfaceY =
       localStats.className === 'assassin' ? standingSurfaceY(player.pos, player.pos.y) : 0;
     const grounded = player.pos.y <= currentSurfaceY + 0.0001 && player.vy <= 0;
+    frameGrounded = grounded;
     if (grounded && keys.jump && !player.crouch) {
       player.vy = localStats.className === 'assassin' ? ASSASSIN_JUMP_SPEED : JUMP_SPEED;
     }
@@ -1227,8 +1284,23 @@ function tick() {
     player.pos.z = obj.position.z;
     obj.position.y = player.pos.y + player.eye;
     camera.rotation.z += (player.lean * -0.13 - camera.rotation.z) * (1 - Math.exp(-dt * 14));
+    movement.wallAvoidance = weaponWallAvoidance();
   } else {
     camera.rotation.z += (0 - camera.rotation.z) * (1 - Math.exp(-dt * 14));
+    movement.wallAvoidance = 0;
+  }
+
+  movement.amount += (frameMoveAmount - movement.amount) * (1 - Math.exp(-dt * 12));
+  movement.running = frameRunning;
+  if (frameMoveAmount > 0) movement.cycle += dt * frameSpeed * (frameRunning ? 2.4 : 1.7);
+  if (controls.isLocked && frameMoveAmount > 0 && frameGrounded) {
+    movement.footstepTimer -= dt;
+    if (movement.footstepTimer <= 0) {
+      sounds.footstep(frameRunning);
+      movement.footstepTimer = frameRunning ? 0.26 : 0.42;
+    }
+  } else {
+    movement.footstepTimer = 0;
   }
 
   input.giHeat = Math.max(0, input.giHeat - dt * 0.75);

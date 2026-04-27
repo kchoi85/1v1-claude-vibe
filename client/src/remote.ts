@@ -13,8 +13,12 @@ type Remote = {
     rx: number;
     lean: number;
     crouch: boolean;
+    vx: number;
+    vz: number;
   };
   attackAnim: { kind: AttackKind; time: number } | null;
+  movePhase: number;
+  lastSync: number;
 };
 
 type HitMark = {
@@ -59,11 +63,20 @@ export class RemotePlayers {
             rx: p.rx,
             lean: p.lean,
             crouch: p.crouch,
+            vx: 0,
+            vz: 0,
           },
           attackAnim: null,
+          movePhase: 0,
+          lastSync: performance.now(),
         };
         this.remotes.set(p.id, r);
       }
+      const now = performance.now();
+      const dt = Math.max(0.016, (now - r.lastSync) / 1000);
+      r.target.vx = (p.px - r.target.x) / dt;
+      r.target.vz = (p.pz - r.target.z) / dt;
+      r.lastSync = now;
       r.target.x = p.px;
       r.target.y = p.py;
       r.target.z = p.pz;
@@ -93,6 +106,12 @@ export class RemotePlayers {
     r.attackAnim = { kind, time: 0.18 };
   }
 
+  weaponTipWorld(id: string, className: PlayerClass): THREE.Vector3 | null {
+    const r = this.remotes.get(id);
+    if (!r) return null;
+    return r.char.weapon.localToWorld(weaponTipLocal(className).clone());
+  }
+
   interpolate(dt: number) {
     const a = 1 - Math.exp(-dt * 18);
     for (const r of this.remotes.values()) {
@@ -107,6 +126,22 @@ export class RemotePlayers {
 
       const targetScale = r.target.crouch ? CROUCH_SCALE : STAND_SCALE;
       g.scale.y += (targetScale - g.scale.y) * a;
+
+      const speed = Math.hypot(r.target.vx, r.target.vz);
+      const running = speed > 7.2;
+      if (speed > 0.08) r.movePhase += dt * (running ? 12 : 8) * Math.min(1.6, speed / 6);
+      const localVx = Math.cos(g.rotation.y) * r.target.vx - Math.sin(g.rotation.y) * r.target.vz;
+      const localVz = Math.sin(g.rotation.y) * r.target.vx + Math.cos(g.rotation.y) * r.target.vz;
+      const stride = Math.min(1, speed / 8);
+      const frontSwing = Math.sin(r.movePhase) * stride * (running ? 0.75 : 0.48);
+      const sideSwing = Math.sin(r.movePhase) * THREE.MathUtils.clamp(localVx / 8, -1, 1) * 0.35;
+      const forwardBias = THREE.MathUtils.clamp(-localVz / 8, -1, 1);
+      r.char.leftLeg.rotation.x += (frontSwing * forwardBias - r.char.leftLeg.rotation.x) * a;
+      r.char.rightLeg.rotation.x += (-frontSwing * forwardBias - r.char.rightLeg.rotation.x) * a;
+      r.char.leftLeg.rotation.z += (sideSwing - r.char.leftLeg.rotation.z) * a;
+      r.char.rightLeg.rotation.z += (sideSwing - r.char.rightLeg.rotation.z) * a;
+      r.char.leftArm.rotation.x += (-frontSwing * forwardBias - r.char.leftArm.rotation.x) * a;
+      r.char.leftArm.rotation.z += (0.18 - sideSwing * 0.65 - r.char.leftArm.rotation.z) * a;
 
       if (r.attackAnim) {
         r.attackAnim.time -= dt;
@@ -138,8 +173,9 @@ export class RemotePlayers {
         r.char.weapon.rotation.z += (WEAPON_BASE_ROT.z - r.char.weapon.rotation.z) * a;
       }
 
-      r.char.rightArm.rotation.x +=
-        (THREE.MathUtils.clamp(r.target.rx, -0.9, 0.9) - r.char.rightArm.rotation.x) * a;
+      const rightArmAim = THREE.MathUtils.clamp(r.target.rx, -0.9, 0.9) + frontSwing * forwardBias;
+      r.char.rightArm.rotation.x += (rightArmAim - r.char.rightArm.rotation.x) * a;
+      r.char.rightArm.rotation.z += (-0.18 + sideSwing * 0.65 - r.char.rightArm.rotation.z) * a;
     }
   }
 
@@ -189,6 +225,12 @@ function weaponAimRotation(pitch: number) {
     WEAPON_BASE_ROT.y,
     WEAPON_BASE_ROT.z,
   );
+}
+
+function weaponTipLocal(className: PlayerClass): THREE.Vector3 {
+  if (className === 'mage') return new THREE.Vector3(0, 0, -0.78);
+  if (className === 'assassin') return new THREE.Vector3(0, 0, -0.66);
+  return new THREE.Vector3(0, 0.02, -0.9);
 }
 
 function shortestAngle(from: number, to: number): number {

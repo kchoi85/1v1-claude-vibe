@@ -86,6 +86,10 @@ export const sounds = {
     tone(220, 0.12, 'square', 0.06, 0.02);
     noise(0.055, 0.06, 0.01);
   },
+  footstep(running = false) {
+    noise(running ? 0.045 : 0.035, running ? 0.035 : 0.026);
+    tone(running ? 92 : 74, running ? 0.045 : 0.035, 'triangle', running ? 0.028 : 0.02);
+  },
 };
 
 export function playAttackSound(kind: AttackKind) {

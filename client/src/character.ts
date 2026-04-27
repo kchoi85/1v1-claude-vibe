@@ -5,7 +5,10 @@ export interface Character {
   group: THREE.Group;
   head: THREE.Group;
   weapon: THREE.Group;
+  leftArm: THREE.Mesh;
   rightArm: THREE.Mesh;
+  leftLeg: THREE.Mesh;
+  rightLeg: THREE.Mesh;
 }
 
 export function makeCharacter(bodyColor: number, className: PlayerClass = 'gi'): Character {
@@ -98,7 +101,7 @@ export function makeCharacter(bodyColor: number, className: PlayerClass = 'gi'):
     }
   });
 
-  return { group, head, weapon, rightArm: rArm };
+  return { group, head, weapon, leftArm: lArm, rightArm: rArm, leftLeg: lLeg, rightLeg: rLeg };
 }
 
 const CLASS_STYLE: Record<
