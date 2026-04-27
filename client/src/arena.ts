@@ -41,7 +41,6 @@ export function buildArena(scene: THREE.Scene, seed = DEFAULT_MAP_SEED): Arena {
 
   addGround(group);
   addOuterWalls(group, collisionBoxes);
-  addRoadDetails(group);
   addGeneratedCover(group, collisionBoxes, seed);
   group.traverse((obj) => {
     if (obj instanceof THREE.Mesh) {
@@ -54,67 +53,25 @@ export function buildArena(scene: THREE.Scene, seed = DEFAULT_MAP_SEED): Arena {
 }
 
 function addGround(scene: THREE.Group) {
-  const grass = new THREE.Mesh(
-    new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({ color: 0x6f9368, roughness: 0.9 }),
-  );
+  const floorMat = makeGridMaterial(0x355d45, 0x9bc8b2, 1, 3, ARENA_HALF, ARENA_HALF);
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2), floorMat);
   grass.rotation.x = -Math.PI / 2;
   grass.receiveShadow = true;
   scene.add(grass);
-
-  const river = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.2, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({
-      color: 0x3d9baa,
-      roughness: 0.65,
-    }),
-  );
-  river.rotation.x = -Math.PI / 2;
-  river.position.set(-13.4, 0.012, 0);
-  river.receiveShadow = true;
-  scene.add(river);
-
-  const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x9fa4a3, roughness: 0.86 });
-  for (const x of [-10.8, -16.0]) {
-    const walk = new THREE.Mesh(new THREE.PlaneGeometry(0.55, ARENA_HALF * 2), sidewalkMat);
-    walk.rotation.x = -Math.PI / 2;
-    walk.position.set(x, 0.018, 0);
-    walk.receiveShadow = true;
-    scene.add(walk);
-  }
-
-  const road = new THREE.Mesh(
-    new THREE.PlaneGeometry(6.8, ARENA_HALF * 2),
-    new THREE.MeshStandardMaterial({ color: 0x4b5355, roughness: 0.92 }),
-  );
-  road.rotation.x = -Math.PI / 2;
-  road.position.y = 0.02;
-  road.receiveShadow = true;
-  scene.add(road);
 }
 
 function addOuterWalls(scene: THREE.Group, boxes: THREE.Box3[]) {
-  const colors = [0x8d8f8f, 0x828989, 0x777d78, 0x8a8379];
-  addBlock(scene, boxes, 0, -ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, colors[0]);
-  addBlock(scene, boxes, 0, ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, colors[1]);
-  addBlock(scene, boxes, -ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, colors[2]);
-  addBlock(scene, boxes, ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, colors[3]);
-}
-
-function addRoadDetails(scene: THREE.Group) {
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xc9bd65, roughness: 0.65 });
-  for (let z = -14; z <= 14; z += 4) {
-    const line = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 1.6), lineMat);
-    line.rotation.x = -Math.PI / 2;
-    line.position.set(0, 0.035, z);
-    scene.add(line);
-  }
+  const wallMat = makeGridMaterial(0x242941, 0x56607e, 1, 4, 16, 2);
+  addBlock(scene, boxes, 0, -ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, wallMat);
+  addBlock(scene, boxes, 0, ARENA_HALF, ARENA_HALF * 2, WALL_THICKNESS, WALL_HEIGHT, wallMat);
+  addBlock(scene, boxes, -ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, wallMat);
+  addBlock(scene, boxes, ARENA_HALF, 0, WALL_THICKNESS, ARENA_HALF * 2, WALL_HEIGHT, wallMat);
 }
 
 function addGeneratedCover(scene: THREE.Group, boxes: THREE.Box3[], seed: number) {
   const rng = seededRandom(seed);
   const specs: CoverSpec[] = [];
-  const palette = [0x60726d, 0x7c756a, 0x5d7278, 0x74736b, 0x687468];
+  const palette = [0xa95734, 0xb76139, 0x9e4d31, 0xb36a3d];
 
   for (let i = 0; specs.length < 12 && i < 140; i++) {
     const mirrored = specs.length % 2 === 1;
@@ -220,7 +177,7 @@ function addVan(scene: THREE.Group, boxes: THREE.Box3[], spec: CoverSpec) {
 
 function addCrates(scene: THREE.Group, boxes: THREE.Box3[], spec: CoverSpec) {
   const size = coverSize(spec);
-  const crateMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.78 });
+  const crateMat = makeGridMaterial(spec.color, 0xffc24d, 1, 5, 2, 2);
   const stack = new THREE.Mesh(new THREE.BoxGeometry(size.w, size.h, size.d), crateMat);
 
   stack.position.set(spec.x, size.h / 2, spec.z);
@@ -284,12 +241,9 @@ function addBlock(
   w: number,
   d: number,
   h: number,
-  color: number,
+  material: THREE.Material,
 ) {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.65 }),
-  );
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   mesh.position.set(x, h / 2, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -300,6 +254,55 @@ function addBlock(
       new THREE.Vector3(x + w / 2, h, z + d / 2),
     ),
   );
+}
+
+function makeGridMaterial(
+  baseColor: number,
+  lineColor: number,
+  cells: number,
+  lineWidth: number,
+  repeatX: number,
+  repeatY: number,
+) {
+  const texture = makeGridTexture(baseColor, lineColor, cells, lineWidth);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshStandardMaterial({
+    map: texture,
+    roughness: 0.72,
+    metalness: 0.03,
+  });
+}
+
+function makeGridTexture(baseColor: number, lineColor: number, cells: number, lineWidth: number) {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = hex(baseColor);
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = hex(lineColor);
+  ctx.lineWidth = lineWidth;
+  const step = size / cells;
+  for (let i = 0; i <= cells; i++) {
+    const p = Math.round(i * step) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, size);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, p);
+    ctx.lineTo(size, p);
+    ctx.stroke();
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
+function hex(color: number) {
+  return `#${color.toString(16).padStart(6, '0')}`;
 }
 
 function seededRandom(seed: number) {
