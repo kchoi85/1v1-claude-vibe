@@ -76,6 +76,7 @@ export type ServerMessage =
   | { t: 'roundOver'; event: RoundOverEvent }
   | { t: 'peerJoined'; name: string }
   | { t: 'peerLeft'; name: string }
+  | { t: 'chat'; name: string; text: string }
   | { t: 'leave'; id: string };
 
 export type ClientMessage =
@@ -104,4 +105,5 @@ export type ClientMessage =
       voz: number;
       charge: number;
     }
-  | { t: 'reload' };
+  | { t: 'reload' }
+  | { t: 'chat'; text: string };

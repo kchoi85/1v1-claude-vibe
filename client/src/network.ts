@@ -28,6 +28,7 @@ export class Network {
   onSession?: (sessionId: string) => void;
   onPeerJoined?: (name: string) => void;
   onPeerLeft?: (name: string) => void;
+  onChat?: (name: string, text: string) => void;
 
   connect(url: string) {
     const ws = new WebSocket(url);
@@ -67,6 +68,8 @@ export class Network {
         this.onPeerJoined?.(msg.name);
       } else if (msg.t === 'peerLeft') {
         this.onPeerLeft?.(msg.name);
+      } else if (msg.t === 'chat') {
+        this.onChat?.(msg.name, msg.text);
       } else if (msg.t === 'leave') {
         this.onLeave?.(msg.id);
       }
@@ -114,6 +117,10 @@ export class Network {
 
   sendReload() {
     this.send({ t: 'reload' });
+  }
+
+  sendChat(text: string) {
+    this.send({ t: 'chat', text });
   }
 
   private send(msg: ClientMessage) {

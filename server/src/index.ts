@@ -213,6 +213,13 @@ wss.on('connection', (ws, req) => {
     } else if (msg.t === 'reload') {
       if (!conn.joined || conn.state.className !== 'gi') return;
       beginReload(conn);
+    } else if (msg.t === 'chat') {
+      if (!conn.joined) return;
+      const text = String(msg.text ?? '')
+        .trim()
+        .slice(0, 120);
+      if (!text) return;
+      broadcastToRoom(room, { t: 'chat', name: conn.state.name || 'Player', text });
     }
   });
 

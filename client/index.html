@@ -212,6 +212,62 @@
         inset: 0;
         overflow: hidden;
       }
+      #chat {
+        position: absolute;
+        left: 18px;
+        bottom: 24px;
+        width: min(320px, calc(100vw - 36px));
+        background: rgba(10, 14, 18, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        padding: 10px;
+        opacity: 0;
+        transform: translateY(8px);
+        transition:
+          opacity 280ms ease,
+          transform 280ms ease;
+      }
+      #chat.visible,
+      #chat.active {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      #chat.active {
+        pointer-events: auto;
+      }
+      #chat-messages {
+        max-height: 148px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 13px;
+        line-height: 1.3;
+      }
+      .chat-line {
+        color: rgba(255, 255, 255, 0.9);
+        text-shadow: 0 1px 5px rgba(0, 0, 0, 0.7);
+        overflow-wrap: anywhere;
+      }
+      .chat-line .name {
+        font-weight: 700;
+      }
+      #chat-input {
+        display: none;
+        width: 100%;
+        margin-top: 9px;
+        box-sizing: border-box;
+        border: 1px solid rgba(102, 204, 255, 0.55);
+        background: rgba(0, 0, 0, 0.5);
+        color: white;
+        border-radius: 4px;
+        padding: 8px 9px;
+        font: 13px monospace;
+        outline: none;
+      }
+      #chat.active #chat-input {
+        display: block;
+      }
       .damage-number {
         position: absolute;
         color: #ffef8a;
@@ -453,6 +509,10 @@
         <div id="player-list"></div>
       </div>
       <div id="damage-layer"></div>
+      <div id="chat">
+        <div id="chat-messages"></div>
+        <input id="chat-input" maxlength="120" autocomplete="off" placeholder="All chat" />
+      </div>
       <div id="hp-panel">
         <div class="label-row">
           <span>HP</span>

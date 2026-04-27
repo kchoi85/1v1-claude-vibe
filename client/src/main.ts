@@ -37,13 +37,32 @@ const hpFillEl = document.getElementById('hp-fill') as HTMLDivElement;
 const hitXEl = document.getElementById('hit-x')!;
 const hurtFlashEl = document.getElementById('hurt-flash')!;
 const damageLayer = document.getElementById('damage-layer')!;
+const chatEl = document.getElementById('chat')!;
+const chatMessagesEl = document.getElementById('chat-messages')!;
+const chatInputEl = document.getElementById('chat-input') as HTMLInputElement;
 const classCards = Array.from(document.querySelectorAll<HTMLButtonElement>('.class-card'));
 
 const score = { me: 0, opp: 0 };
+let statusResetTimer: ReturnType<typeof setTimeout> | null = null;
 function renderScore() {
   renderScoreUi(scoreMeEl, scoreOppEl, score);
 }
 renderScore();
+
+function setStatus(text: string, temporaryMs = 0) {
+  if (statusResetTimer) {
+    clearTimeout(statusResetTimer);
+    statusResetTimer = null;
+  }
+  statusEl.textContent = text;
+  if (temporaryMs > 0) {
+    statusResetTimer = setTimeout(() => {
+      statusEl.textContent =
+        network.ws?.readyState === WebSocket.OPEN ? 'connected' : 'disconnected';
+      statusResetTimer = null;
+    }, temporaryMs);
+  }
+}
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x202830);
@@ -118,7 +137,7 @@ const gameplayKeyCodes = new Set([
 ]);
 
 function shouldCaptureGameplayKey(e: KeyboardEvent) {
-  return hasJoined && gameplayKeyCodes.has(e.code);
+  return hasJoined && !chatEl.classList.contains('active') && gameplayKeyCodes.has(e.code);
 }
 
 function enterGameplayMode() {
@@ -153,6 +172,12 @@ window.addEventListener(
 );
 
 window.addEventListener('keydown', (e) => {
+  if (hasJoined && e.code === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    openChat();
+    return;
+  }
+  if (chatEl.classList.contains('active')) return;
   if (e.code === 'KeyW') keys.w = true;
   if (e.code === 'KeyA') keys.a = true;
   if (e.code === 'KeyS') keys.s = true;
@@ -172,6 +197,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('keyup', (e) => {
+  if (chatEl.classList.contains('active')) return;
   if (e.code === 'KeyW') keys.w = false;
   if (e.code === 'KeyA') keys.a = false;
   if (e.code === 'KeyS') keys.s = false;
@@ -212,6 +238,7 @@ window.addEventListener('resize', () => {
 
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('mousedown', (e) => {
+  if (chatEl.classList.contains('active')) return;
   if (!controls.isLocked || !hasJoined) return;
   if (e.button === 0) beginPrimary();
   if (e.button === 2) beginSecondary();
@@ -417,25 +444,26 @@ let myName = '';
 let lastPlayers: PlayerState[] = [];
 
 network.onConnect = () => {
-  statusEl.textContent = 'connected';
+  setStatus('connected');
   joinBtn.disabled = false;
   fullscreenJoinBtn.disabled = false;
 };
 network.onDisconnect = () => {
-  statusEl.textContent = 'disconnected - start server: npm run dev:server';
+  setStatus('disconnected - start server: npm run dev:server');
   joinBtn.disabled = true;
   fullscreenJoinBtn.disabled = true;
 };
 network.onMapSeed = (seed) => setMapSeed(seed);
 network.onSession = (serverSessionId) => {
-  if (serverSessionId !== sessionId) statusEl.textContent = `session ${serverSessionId}`;
+  if (serverSessionId !== sessionId) setStatus(`session ${serverSessionId}`, 2500);
 };
 network.onPeerJoined = (name) => {
-  statusEl.textContent = `${name} entered the session`;
+  setStatus(`${name} entered the session`, 2500);
 };
 network.onPeerLeft = (name) => {
-  statusEl.textContent = `${name} left the session`;
+  setStatus(`${name} left the session`, 2500);
 };
+network.onChat = (name, text) => addChatMessage(name, text);
 network.onState = (players) => {
   lastPlayers = players;
   const me = players.find((p) => p.id === network.myId);
@@ -601,11 +629,83 @@ async function copySessionLink() {
   const link = sessionShareUrl();
   try {
     await navigator.clipboard.writeText(link);
-    statusEl.textContent = 'session link copied';
+    setStatus('session link copied', 1800);
   } catch {
     window.prompt('Copy session link', link);
   }
 }
+
+type ChatMessage = { name: string; text: string };
+const chatMessages: ChatMessage[] = [];
+let chatFadeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function openChat() {
+  chatEl.classList.add('visible', 'active');
+  if (chatFadeTimer) {
+    clearTimeout(chatFadeTimer);
+    chatFadeTimer = null;
+  }
+  clearGameplayInput();
+  chatInputEl.value = '';
+  setTimeout(() => chatInputEl.focus(), 0);
+}
+
+function closeChat() {
+  chatEl.classList.remove('active');
+  chatInputEl.blur();
+  scheduleChatFade();
+}
+
+function addChatMessage(name: string, text: string) {
+  chatMessages.push({ name, text });
+  while (chatMessages.length > 20) chatMessages.shift();
+  renderChatMessages();
+  chatEl.classList.add('visible');
+  if (!chatEl.classList.contains('active')) scheduleChatFade();
+}
+
+function renderChatMessages() {
+  chatMessagesEl.replaceChildren(
+    ...chatMessages.map((msg) => {
+      const line = document.createElement('div');
+      line.className = 'chat-line';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = `${msg.name}: `;
+      line.append(name, document.createTextNode(msg.text));
+      return line;
+    }),
+  );
+}
+
+function scheduleChatFade() {
+  if (chatFadeTimer) clearTimeout(chatFadeTimer);
+  chatFadeTimer = setTimeout(() => {
+    if (!chatEl.classList.contains('active')) chatEl.classList.remove('visible');
+    chatFadeTimer = null;
+  }, 4200);
+}
+
+chatInputEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const text = chatInputEl.value.trim();
+    if (text) network.sendChat(text);
+    closeChat();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeChat();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+  }
+});
+
+chatInputEl.addEventListener('keyup', (e) => {
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+});
 
 function makeWebSocketUrl(session: string) {
   const params = new URLSearchParams({ session });
