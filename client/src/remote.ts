@@ -19,6 +19,7 @@ type Remote = {
   attackAnim: { kind: AttackKind; time: number } | null;
   flinch: number;
   flinchDir: THREE.Vector3;
+  flinchLocal: THREE.Vector3;
   movePhase: number;
   lastSync: number;
 };
@@ -72,6 +73,7 @@ export class RemotePlayers {
           attackAnim: null,
           flinch: 0,
           flinchDir: new THREE.Vector3(),
+          flinchLocal: new THREE.Vector3(),
           movePhase: 0,
           lastSync: performance.now(),
         };
@@ -116,6 +118,7 @@ export class RemotePlayers {
     if (!r) return;
     r.flinch = 0.28;
     r.flinchDir.copy(dir);
+    r.flinchLocal.copy(dir).applyAxisAngle(new THREE.Vector3(0, 1, 0), -r.char.group.rotation.y);
   }
 
   weaponTipWorld(id: string, className: PlayerClass): THREE.Vector3 | null {
@@ -132,13 +135,14 @@ export class RemotePlayers {
       const flinchP = r.flinch > 0 ? Math.sin((r.flinch / 0.28) * Math.PI) : 0;
       const flinchOffsetX = r.flinchDir.x * flinchP * 0.18;
       const flinchOffsetZ = r.flinchDir.z * flinchP * 0.18;
+      const flinchPitch = r.flinchLocal.z * flinchP * 0.22;
+      const flinchRoll = -r.flinchLocal.x * flinchP * 0.2;
       g.position.x += (r.target.x + flinchOffsetX - g.position.x) * a;
       g.position.y += (r.target.y - g.position.y) * a;
       g.position.z += (r.target.z + flinchOffsetZ - g.position.z) * a;
       g.rotation.y += shortestAngle(g.rotation.y, r.target.ry) * a;
-      g.rotation.z += (r.target.lean * -0.16 - g.rotation.z) * a;
-      g.rotation.x += (flinchP * 0.18 - g.rotation.x) * a;
-      g.rotation.z += -r.flinchDir.x * flinchP * 0.16 * a;
+      g.rotation.x += (flinchPitch - g.rotation.x) * a;
+      g.rotation.z += (r.target.lean * -0.16 + flinchRoll - g.rotation.z) * a;
       const peekX = Math.cos(g.rotation.y) * r.target.lean * PEEK_OFFSET;
       const peekZ = -Math.sin(g.rotation.y) * r.target.lean * PEEK_OFFSET;
 
