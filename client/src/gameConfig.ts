@@ -30,12 +30,12 @@ export const ATTACK_CONFIG: Record<
 };
 
 export const GI_GUN = {
-  spreadRad: 0.018,
-  aimedSpreadRad: 0.006,
-  recoilPitchRad: 0.012,
-  recoilYawRad: 0.008,
+  spreadRad: 0.02,
+  aimedSpreadRad: 0.007,
+  recoilPitchRad: 0.026,
+  recoilYawRad: 0.007,
   aimedRecoilMult: 0.55,
-  maxRecoverablePitchRad: 0.14,
-  maxRecoverableYawRad: 0.08,
+  maxRecoverablePitchRad: 0.34,
+  maxRecoverableYawRad: 0.09,
   firstShotResetMs: 340,
 };

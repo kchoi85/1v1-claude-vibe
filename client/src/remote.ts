@@ -17,6 +17,8 @@ type Remote = {
     vz: number;
   };
   attackAnim: { kind: AttackKind; time: number } | null;
+  flinch: number;
+  flinchDir: THREE.Vector3;
   movePhase: number;
   lastSync: number;
 };
@@ -68,6 +70,8 @@ export class RemotePlayers {
             vz: 0,
           },
           attackAnim: null,
+          flinch: 0,
+          flinchDir: new THREE.Vector3(),
           movePhase: 0,
           lastSync: performance.now(),
         };
@@ -107,6 +111,13 @@ export class RemotePlayers {
     r.attackAnim = { kind, time: 0.18 };
   }
 
+  playHit(id: string, dir: THREE.Vector3) {
+    const r = this.remotes.get(id);
+    if (!r) return;
+    r.flinch = 0.28;
+    r.flinchDir.copy(dir);
+  }
+
   weaponTipWorld(id: string, className: PlayerClass): THREE.Vector3 | null {
     const r = this.remotes.get(id);
     if (!r) return null;
@@ -117,15 +128,22 @@ export class RemotePlayers {
     const a = 1 - Math.exp(-dt * 18);
     for (const r of this.remotes.values()) {
       const g = r.char.group;
-      g.position.x += (r.target.x - g.position.x) * a;
+      if (r.flinch > 0) r.flinch = Math.max(0, r.flinch - dt);
+      const flinchP = r.flinch > 0 ? Math.sin((r.flinch / 0.28) * Math.PI) : 0;
+      const flinchOffsetX = r.flinchDir.x * flinchP * 0.18;
+      const flinchOffsetZ = r.flinchDir.z * flinchP * 0.18;
+      g.position.x += (r.target.x + flinchOffsetX - g.position.x) * a;
       g.position.y += (r.target.y - g.position.y) * a;
-      g.position.z += (r.target.z - g.position.z) * a;
+      g.position.z += (r.target.z + flinchOffsetZ - g.position.z) * a;
       g.rotation.y += shortestAngle(g.rotation.y, r.target.ry) * a;
       g.rotation.z += (r.target.lean * -0.16 - g.rotation.z) * a;
+      g.rotation.x += (flinchP * 0.18 - g.rotation.x) * a;
+      g.rotation.z += -r.flinchDir.x * flinchP * 0.16 * a;
       const peekX = Math.cos(g.rotation.y) * r.target.lean * PEEK_OFFSET;
       const peekZ = -Math.sin(g.rotation.y) * r.target.lean * PEEK_OFFSET;
 
       r.char.head.rotation.x += (r.target.rx - r.char.head.rotation.x) * a;
+      r.char.head.rotation.z += (flinchP * 0.18 - r.char.head.rotation.z) * a;
       r.char.head.position.x += (peekX - r.char.head.position.x) * a;
       r.char.head.position.z += (peekZ - r.char.head.position.z) * a;
       r.char.weapon.position.x += (WEAPON_BASE_POS.x + peekX - r.char.weapon.position.x) * a;

@@ -65,8 +65,8 @@ const CLASS_STATS: Record<
 
 const HEADSHOT_FULL_KILL_RANGE = 28;
 const HEADSHOT_FALLOFF_END = 60;
-const HEADSHOT_CLOSE_SCALE = 0.8;
-const HEADSHOT_FAR_SCALE = 0.6;
+const HEADSHOT_CLOSE_SCALE = 0.65;
+const HEADSHOT_FAR_SCALE = 0.45;
 
 const ATTACKS: Record<
   AttackKind,
@@ -350,7 +350,7 @@ function processAttackRay(
   broadcastToRoom(room, { t: 'attack', effect });
 
   if (blocked || !hit) return;
-  const damage = damageForHit(spec, hit);
+  const damage = damageForHit(kind, spec, hit);
   if (!isTrainingDummy(hit.target)) {
     hit.target.state.hp = Math.max(0, hit.target.state.hp - damage);
     applyAttackPush(spec, hit.target, dir);
@@ -482,11 +482,18 @@ function findHit(
   return best;
 }
 
-function damageForHit(spec: (typeof ATTACKS)[AttackKind], hit: HitResult): number {
-  if (hit.part === 'head' && spec.className !== 'assassin') {
+function damageForHit(
+  kind: AttackKind,
+  spec: (typeof ATTACKS)[AttackKind],
+  hit: HitResult,
+): number {
+  if (hit.part === 'head' && spec.className !== 'assassin' && kind !== 'mage-charged') {
     if (isTrainingDummy(hit.target)) return spec.damage * 3;
     if (hit.dist <= HEADSHOT_FULL_KILL_RANGE) return hit.target.state.hp;
-    return Math.max(1, Math.floor(hit.target.state.hp * headshotFalloffScale(hit.dist)));
+    return Math.min(
+      hit.target.state.hp - 1,
+      Math.max(1, Math.floor(hit.target.state.hp * headshotFalloffScale(hit.dist))),
+    );
   }
   if (spec.className !== 'gi') return spec.damage;
   if (hit.part === 'torso') return spec.damage;

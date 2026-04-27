@@ -805,7 +805,7 @@ function fireAttack(kind: AttackKind, charge = 0) {
   input.nextAttackAt = now + config.cooldown;
   if (kind === 'gi-shot') input.lastGiShotAt = now;
   if (config.localAmmo) {
-    input.giHeat = Math.min(1, input.giHeat + 0.08);
+    input.giHeat = Math.min(1, input.giHeat + 0.11);
     localStats.ammo = Math.max(0, localStats.ammo - 1);
     renderAmmo();
     dropBulletCase();
@@ -819,13 +819,13 @@ function fireAttack(kind: AttackKind, charge = 0) {
   camera.getWorldDirection(direction);
   if (shouldSpreadGiShot) applyGiSpread(direction);
   network.sendAttack(kind, origin, direction, charge, visualOrigin);
-  if (kind === 'gi-shot' && !isSettledGiShot) applyGiRecoil();
+  if (kind === 'gi-shot') applyGiRecoil();
   if (kind !== 'gi-shot') applyAttackCameraKick(kind);
 }
 
 function applyGiSpread(direction: THREE.Vector3) {
-  const heatSpread = GI_GUN.spreadRad * (1 + input.giHeat * 2.2);
-  const spread = input.aimHeld ? GI_GUN.aimedSpreadRad * (1 + input.giHeat) : heatSpread;
+  const heatSpread = GI_GUN.spreadRad * (1 + input.giHeat * 2.6);
+  const spread = input.aimHeld ? GI_GUN.aimedSpreadRad * (1 + input.giHeat * 1.35) : heatSpread;
   const yaw = (Math.random() * 2 - 1) * spread;
   const pitch = (Math.random() * 2 - 1) * spread;
   const right = new THREE.Vector3().crossVectors(direction, UP).normalize();
@@ -835,7 +835,8 @@ function applyGiSpread(direction: THREE.Vector3) {
 
 function applyGiRecoil() {
   const mult = input.aimHeld ? GI_GUN.aimedRecoilMult : 1;
-  const pitchKick = GI_GUN.recoilPitchRad * mult * (0.75 + Math.random() * 0.5);
+  const climb = 1 + input.giHeat * 1.15;
+  const pitchKick = GI_GUN.recoilPitchRad * mult * climb * (0.9 + Math.random() * 0.22);
   const yawKick = GI_GUN.recoilYawRad * mult * (Math.random() * 2 - 1);
   const nextPitch = THREE.MathUtils.clamp(
     camera.rotation.x + pitchKick,
@@ -855,7 +856,7 @@ function applyGiRecoil() {
     -GI_GUN.maxRecoverableYawRad,
     GI_GUN.maxRecoverableYawRad,
   );
-  recoil.weaponKick = Math.min(1, recoil.weaponKick + 0.42);
+  recoil.weaponKick = Math.min(1.35, recoil.weaponKick + 0.52);
 }
 
 function applyAttackCameraKick(kind: Exclude<AttackKind, 'gi-shot'>) {
@@ -1002,7 +1003,7 @@ function updateWeaponAnimation(dt: number) {
 }
 
 function updateRecoil(dt: number) {
-  const alpha = 1 - Math.exp(-dt * 9);
+  const alpha = 1 - Math.exp(-dt * 5.5);
   const pitchRecover = recoil.pitch * alpha;
   const yawRecover = recoil.yaw * alpha;
   camera.rotation.x = THREE.MathUtils.clamp(
@@ -1175,6 +1176,7 @@ function placeImpactDecal(
 function addHitEffects(event: DamageEvent) {
   const point = new THREE.Vector3(event.hx, event.hy, event.hz);
   remotes.addHitMark(event.targetId, point, event.headshot);
+  remotes.playHit(event.targetId, hitDirection(event));
   const puff = new THREE.Mesh(
     new THREE.SphereGeometry(event.headshot ? 0.16 : 0.11, 10, 8),
     new THREE.MeshBasicMaterial({
@@ -1186,6 +1188,15 @@ function addHitEffects(event: DamageEvent) {
   puff.position.copy(point);
   scene.add(puff);
   timedObjects.push({ obj: puff, life: 0.28, maxLife: 0.28 });
+}
+
+function hitDirection(event: DamageEvent) {
+  const attacker = lastPlayers.find((p) => p.id === event.attackerId);
+  const dir = attacker
+    ? new THREE.Vector3(event.x - attacker.px, 0, event.z - attacker.pz)
+    : new THREE.Vector3(event.x - event.hx, 0, event.z - event.hz);
+  if (dir.lengthSq() < 0.0001) return new THREE.Vector3(0, 0, 1);
+  return dir.normalize();
 }
 
 function clearPersistentHitEffects() {
