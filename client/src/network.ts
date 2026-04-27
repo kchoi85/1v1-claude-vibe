@@ -25,6 +25,9 @@ export class Network {
   onReloaded?: (ammo: number) => void;
   onRoundOver?: (event: RoundOverEvent) => void;
   onMapSeed?: (seed: number) => void;
+  onSession?: (sessionId: string) => void;
+  onPeerJoined?: (name: string) => void;
+  onPeerLeft?: (name: string) => void;
 
   connect(url: string) {
     const ws = new WebSocket(url);
@@ -45,6 +48,7 @@ export class Network {
       }
       if (msg.t === 'welcome') {
         this.myId = msg.id;
+        this.onSession?.(msg.sessionId);
         this.onMapSeed?.(msg.mapSeed);
         this.onState?.(msg.players);
       } else if (msg.t === 'state') {
@@ -59,14 +63,18 @@ export class Network {
         this.onReloaded?.(msg.ammo);
       } else if (msg.t === 'roundOver') {
         this.onRoundOver?.(msg.event);
+      } else if (msg.t === 'peerJoined') {
+        this.onPeerJoined?.(msg.name);
+      } else if (msg.t === 'peerLeft') {
+        this.onPeerLeft?.(msg.name);
       } else if (msg.t === 'leave') {
         this.onLeave?.(msg.id);
       }
     };
   }
 
-  sendJoin(name: string, className: PlayerClass) {
-    this.send({ t: 'join', name, className });
+  sendJoin(name: string, className: PlayerClass, sessionId: string) {
+    this.send({ t: 'join', name, className, sessionId });
   }
 
   sendInput(

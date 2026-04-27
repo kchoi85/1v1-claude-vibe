@@ -24,6 +24,7 @@ const playText = document.getElementById('play-text')!;
 const nameInput = document.getElementById('name-input') as HTMLInputElement;
 const nameErrorEl = document.getElementById('name-error')!;
 const joinBtn = document.getElementById('join-btn') as HTMLButtonElement;
+const copySessionBtn = document.getElementById('copy-session-btn') as HTMLButtonElement;
 const fullscreenJoinBtn = document.getElementById('fullscreen-join-btn') as HTMLButtonElement;
 const statusEl = document.getElementById('status')!;
 const scoreMeEl = document.getElementById('score-me')!;
@@ -276,6 +277,7 @@ const ATTACK_CAMERA_KICK: Record<
 
 let hasJoined = false;
 let selectedClass: PlayerClass = 'gi';
+const sessionId = ensureSessionId();
 let viewWeapon: THREE.Group | null = null;
 setViewWeapon(selectedClass);
 renderAmmo();
@@ -417,6 +419,15 @@ network.onDisconnect = () => {
   fullscreenJoinBtn.disabled = true;
 };
 network.onMapSeed = (seed) => setMapSeed(seed);
+network.onSession = (serverSessionId) => {
+  if (serverSessionId !== sessionId) statusEl.textContent = `session ${serverSessionId}`;
+};
+network.onPeerJoined = (name) => {
+  statusEl.textContent = `${name} entered the session`;
+};
+network.onPeerLeft = (name) => {
+  statusEl.textContent = `${name} left the session`;
+};
 network.onState = (players) => {
   lastPlayers = players;
   const me = players.find((p) => p.id === network.myId);
@@ -523,7 +534,7 @@ async function attemptJoin(options: { fullscreen?: boolean } = {}) {
   if (options.fullscreen) await requestPageFullscreen();
   localStats.className = selectedClass;
   setViewWeapon(selectedClass);
-  network.sendJoin(myName, selectedClass);
+  network.sendJoin(myName, selectedClass, sessionId);
   hasJoined = true;
   nameForm.style.display = 'none';
   playText.style.display = 'block';
@@ -532,6 +543,7 @@ async function attemptJoin(options: { fullscreen?: boolean } = {}) {
 }
 
 joinBtn.addEventListener('click', () => void attemptJoin());
+copySessionBtn.addEventListener('click', () => void copySessionLink());
 fullscreenJoinBtn.addEventListener('click', () => void attemptJoin({ fullscreen: true }));
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') void attemptJoin();
@@ -545,8 +557,57 @@ overlay.addEventListener('click', () => {
   if (hasJoined) enterGameplayMode();
 });
 
-network.connect('ws://localhost:8080');
+network.connect(makeWebSocketUrl(sessionId));
 nameInput.focus();
+
+function ensureSessionId() {
+  const url = new URL(window.location.href);
+  const existing = normalizeSessionId(url.searchParams.get('session'));
+  if (existing) return existing;
+  const generated = crypto.randomUUID?.().slice(0, 8) ?? Math.random().toString(36).slice(2, 10);
+  url.searchParams.set('session', generated);
+  window.history.replaceState(null, '', url);
+  return generated;
+}
+
+function normalizeSessionId(value: string | null) {
+  const cleaned =
+    value
+      ?.toLowerCase()
+      .replace(/[^a-z0-9-]/g, '')
+      .slice(0, 32) ?? '';
+  return cleaned.length >= 4 ? cleaned : '';
+}
+
+function sessionShareUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('session', sessionId);
+  return url.toString();
+}
+
+async function copySessionLink() {
+  const link = sessionShareUrl();
+  try {
+    await navigator.clipboard.writeText(link);
+    statusEl.textContent = 'session link copied';
+  } catch {
+    window.prompt('Copy session link', link);
+  }
+}
+
+function makeWebSocketUrl(session: string) {
+  const params = new URLSearchParams({ session });
+  const isLocal =
+    window.location.protocol === 'file:' ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '[::1]';
+  if (isLocal) {
+    return `ws://localhost:8080?${params}`;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}?${params}`;
+}
 
 function beginPrimary() {
   if (localStats.className === 'gi') {

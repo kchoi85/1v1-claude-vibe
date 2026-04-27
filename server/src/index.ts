@@ -1,3 +1,7 @@
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { extname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type {
   AttackEffect,
@@ -17,6 +21,7 @@ type Connected = {
   id: string;
   ws: WebSocket;
   state: PlayerState;
+  roomId: string;
   joined: boolean;
   slot: number;
   lastAttackAt: number;
@@ -35,7 +40,17 @@ type TrainingDummy = {
 
 type CombatTarget = Connected | TrainingDummy;
 
+type Room = {
+  id: string;
+  players: Map<string, Connected>;
+  trainingDummy: TrainingDummy;
+  mapSeed: number;
+  mapBlockers: MapBlocker[];
+  roundSpawns: [SpawnPoint, SpawnPoint];
+};
+
 const players = new Map<string, Connected>();
+const rooms = new Map<string, Room>();
 let nextId = 1;
 let nextEventId = 1;
 
@@ -46,30 +61,6 @@ const CLASS_STATS: Record<
   gi: { maxHp: 150, maxAmmo: 30, cooldownMs: 85, reloadMs: 1250 },
   mage: { maxHp: 100, maxAmmo: 999, cooldownMs: 650, reloadMs: 0 },
   assassin: { maxHp: 100, maxAmmo: 999, cooldownMs: 620, reloadMs: 0 },
-};
-
-const trainingDummy: TrainingDummy = {
-  id: 'training-dummy',
-  state: {
-    id: 'training-dummy',
-    name: 'Training Dummy',
-    className: 'mage',
-    px: 0,
-    py: 0,
-    pz: 0,
-    ry: Math.PI,
-    rx: 0,
-    lean: 0,
-    crouch: false,
-    hp: 999999,
-    maxHp: 999999,
-    ammo: CLASS_STATS.mage.maxAmmo,
-    maxAmmo: CLASS_STATS.mage.maxAmmo,
-    score: 0,
-  },
-  joined: true,
-  roundLocked: false,
-  respawnTimer: null,
 };
 
 const ATTACKS: Record<
@@ -104,14 +95,13 @@ type MapBlocker = { min: Vec3; max: Vec3 };
 const ARENA_HALF = 18;
 const WALL_HEIGHT = 2.2;
 const WALL_THICKNESS = 0.8;
-const MAP_SEED = Math.floor(Math.random() * 1_000_000_000);
-const MAP_BLOCKERS = buildMapBlockers(MAP_SEED);
-let roundSpawns = makeSpawnPair();
+const STATIC_ROOT = resolve(fileURLToPath(new URL('../../client/dist', import.meta.url)));
+const httpServer = createServer(serveStatic);
+const wss = new WebSocketServer({ server: httpServer });
 
-const wss = new WebSocketServer({ port: PORT });
-
-wss.on('connection', (ws) => {
-  if (players.size >= 2) {
+wss.on('connection', (ws, req) => {
+  const room = getRoom(sessionFromRequest(req));
+  if (room.players.size >= 2) {
     ws.close(4000, 'match full');
     return;
   }
@@ -120,6 +110,7 @@ wss.on('connection', (ws) => {
   const conn: Connected = {
     id,
     ws,
+    roomId: room.id,
     state: {
       id,
       name: '',
@@ -145,9 +136,16 @@ wss.on('connection', (ws) => {
     roundLocked: false,
   };
   players.set(id, conn);
-  console.log(`[server] +${id} connected (${players.size}/2)`);
+  room.players.set(id, conn);
+  console.log(`[server] +${id} connected to ${room.id} (${room.players.size}/2)`);
 
-  send(ws, { t: 'welcome', id, players: joinedSnapshot(), mapSeed: MAP_SEED });
+  send(ws, {
+    t: 'welcome',
+    id,
+    players: joinedSnapshot(room),
+    mapSeed: room.mapSeed,
+    sessionId: room.id,
+  });
 
   ws.on('message', (data) => {
     let msg: ClientMessage;
@@ -168,12 +166,12 @@ wss.on('connection', (ws) => {
         conn.state.className = className;
         return;
       }
-      const slot = findFreeSlot();
+      const slot = findFreeSlot(room);
       if (slot < 0) {
         ws.close(4001, 'no spawn slot');
         return;
       }
-      const sp = roundSpawns[slot];
+      const sp = room.roundSpawns[slot];
       conn.slot = slot;
       conn.state.name = name;
       conn.state.className = className;
@@ -194,6 +192,7 @@ wss.on('connection', (ws) => {
       conn.roundLocked = false;
       console.log(`[server] ${id} joined as "${name}" (${className}, slot ${slot})`);
       send(ws, { t: 'spawn', x: sp.x, z: sp.z, ry: sp.ry });
+      broadcastToRoom(room, { t: 'peerJoined', name }, id);
     } else if (msg.t === 'input') {
       if (!conn.joined) return;
       conn.state.px = msg.px;
@@ -215,38 +214,47 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const wasJoined = conn.joined;
     players.delete(id);
-    console.log(`[server] -${id} disconnected (${players.size}/2)`);
-    if (wasJoined) broadcast({ t: 'leave', id });
+    room.players.delete(id);
+    console.log(`[server] -${id} disconnected from ${room.id} (${room.players.size}/2)`);
+    if (wasJoined) {
+      broadcastToRoom(room, { t: 'leave', id });
+      broadcastToRoom(room, { t: 'peerLeft', name: conn.state.name || 'Player' });
+    }
+    if (room.players.size === 0) rooms.delete(room.id);
   });
 });
 
 setInterval(() => {
-  const snapshot = joinedSnapshot();
-  if (snapshot.length === 0) return;
-  broadcast({ t: 'state', players: snapshot });
+  for (const room of rooms.values()) {
+    const snapshot = joinedSnapshot(room);
+    if (snapshot.length <= 1) continue;
+    broadcastToRoom(room, { t: 'state', players: snapshot });
+  }
 }, TICK_MS);
 
-function joinedSnapshot(): PlayerState[] {
+function joinedSnapshot(room: Room): PlayerState[] {
   const out: PlayerState[] = [];
-  for (const p of players.values()) {
+  for (const p of room.players.values()) {
     if (p.joined) out.push(p.state);
   }
-  out.push(trainingDummy.state);
+  out.push(room.trainingDummy.state);
   return out;
 }
 
-function findFreeSlot(): number {
+function findFreeSlot(room: Room): number {
   const used = new Set<number>();
-  for (const p of players.values()) {
+  for (const p of room.players.values()) {
     if (p.joined) used.add(p.slot);
   }
-  for (let i = 0; i < roundSpawns.length; i++) {
+  for (let i = 0; i < room.roundSpawns.length; i++) {
     if (!used.has(i)) return i;
   }
   return -1;
 }
 
 function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack' }>) {
+  const room = rooms.get(conn.roomId);
+  if (!room) return;
   const spec = ATTACKS[msg.kind];
   if (!spec || spec.className !== conn.state.className) return;
   if (conn.roundLocked) return;
@@ -279,14 +287,15 @@ function handleAttack(conn: Connected, msg: Extract<ClientMessage, { t: 'attack'
   if (msg.kind === 'mage-charged') {
     const dirs = shotgunDirs(dir, conn.state.ry, conn.state.rx);
     for (let i = 0; i < dirs.length; i++) {
-      processAttackRay(conn, msg.kind, spec, visualOrigin, rayOrigin, dirs[i], i === 0);
+      processAttackRay(room, conn, msg.kind, spec, visualOrigin, rayOrigin, dirs[i], i === 0);
     }
     return;
   }
-  processAttackRay(conn, msg.kind, spec, visualOrigin, rayOrigin, dir, true);
+  processAttackRay(room, conn, msg.kind, spec, visualOrigin, rayOrigin, dir, true);
 }
 
 function processAttackRay(
+  room: Room,
   conn: Connected,
   kind: AttackKind,
   spec: (typeof ATTACKS)[AttackKind],
@@ -295,8 +304,8 @@ function processAttackRay(
   dir: Vec3,
   sound: boolean,
 ) {
-  const hit = findHit(conn, rayOrigin, dir, spec);
-  const blocker = findShotBlocker(rayOrigin, dir, spec.range, spec.radius);
+  const hit = findHit(room, conn, rayOrigin, dir, spec);
+  const blocker = findShotBlocker(room, rayOrigin, dir, spec.range, spec.radius);
   const blocked = !!blocker && (!hit || blocker.dist < hit.dist);
   const endpoint = blocked
     ? blocker.point
@@ -326,7 +335,7 @@ function processAttackRay(
     blocked,
     sound,
   };
-  broadcast({ t: 'attack', effect });
+  broadcastToRoom(room, { t: 'attack', effect });
 
   if (blocked || !hit) return;
   const damage = damageForHit(spec, hit);
@@ -335,7 +344,7 @@ function processAttackRay(
     applyAttackPush(spec, hit.target, dir);
   }
   const headshot = hit.part === 'head' && spec.className !== 'assassin';
-  broadcast({
+  broadcastToRoom(room, {
     t: 'damage',
     event: {
       id: String(nextEventId++),
@@ -357,9 +366,9 @@ function processAttackRay(
 
   if (hit.target.state.hp <= 0) {
     if (isTrainingDummy(hit.target)) {
-      scheduleTrainingDummyRespawn();
+      scheduleTrainingDummyRespawn(room);
     } else {
-      finishRound(conn, hit.target);
+      finishRound(room, conn, hit.target);
     }
   }
 }
@@ -401,24 +410,24 @@ function beginReload(conn: Connected) {
   }, stats.reloadMs);
 }
 
-function finishRound(winner: Connected, loser: Connected) {
+function finishRound(room: Room, winner: Connected, loser: Connected) {
   if (winner.roundLocked || loser.roundLocked) return;
   winner.roundLocked = true;
   loser.roundLocked = true;
   winner.state.score += 1;
-  broadcast({
+  broadcastToRoom(room, {
     t: 'roundOver',
     event: {
       winnerId: winner.id,
       loserId: loser.id,
-      scores: [...players.values()]
+      scores: [...room.players.values()]
         .filter((p) => p.joined)
         .map((p) => ({ id: p.id, score: p.state.score })),
     },
   });
   setTimeout(() => {
-    roundSpawns = makeSpawnPair();
-    for (const p of players.values()) {
+    room.roundSpawns = makeSpawnPair(room.mapBlockers);
+    for (const p of room.players.values()) {
       if (!p.joined) continue;
       respawn(p);
       p.roundLocked = false;
@@ -427,13 +436,14 @@ function finishRound(winner: Connected, loser: Connected) {
 }
 
 function findHit(
+  room: Room,
   attacker: Connected,
   origin: Vec3,
   dir: Vec3,
   spec: (typeof ATTACKS)[AttackKind],
 ): HitResult | null {
   let best: HitResult | null = null;
-  for (const target of combatTargets()) {
+  for (const target of combatTargets(room)) {
     if (!target.joined || target.id === attacker.id) continue;
     if (target.roundLocked || target.state.hp <= 0) continue;
     const roughCenter = {
@@ -469,24 +479,26 @@ function damageForHit(spec: (typeof ATTACKS)[AttackKind], hit: HitResult): numbe
   return Math.max(1, Math.round(spec.damage * 0.5));
 }
 
-function combatTargets(): CombatTarget[] {
-  return [...players.values(), trainingDummy];
+function combatTargets(room: Room): CombatTarget[] {
+  return [...room.players.values(), room.trainingDummy];
 }
 
 function isTrainingDummy(target: CombatTarget): target is TrainingDummy {
-  return target.id === trainingDummy.id;
+  return target.id === 'training-dummy';
 }
 
-function scheduleTrainingDummyRespawn() {
+function scheduleTrainingDummyRespawn(room: Room) {
+  const trainingDummy = room.trainingDummy;
   if (trainingDummy.respawnTimer) return;
   trainingDummy.roundLocked = true;
   trainingDummy.respawnTimer = setTimeout(() => {
     trainingDummy.respawnTimer = null;
-    respawnTrainingDummy();
+    respawnTrainingDummy(room);
   }, 700);
 }
 
-function respawnTrainingDummy() {
+function respawnTrainingDummy(room: Room) {
+  const trainingDummy = room.trainingDummy;
   trainingDummy.state.hp = trainingDummy.state.maxHp;
   trainingDummy.state.px = 0;
   trainingDummy.state.py = 0;
@@ -577,18 +589,20 @@ function addBlocker(blockers: MapBlocker[], x: number, z: number, w: number, d: 
 }
 
 function findShotBlocker(
+  room: Room,
   origin: Vec3,
   dir: Vec3,
   maxRange: number,
   extraRadius: number,
 ): { point: Vec3; dist: number } | null {
-  const mapHit = findMapBlocker(origin, dir, maxRange, extraRadius);
+  const mapHit = findMapBlocker(room.mapBlockers, origin, dir, maxRange, extraRadius);
   const groundHit = findGroundBlocker(origin, dir, maxRange);
   if (!groundHit) return mapHit;
   return chooseCloser(mapHit, groundHit);
 }
 
 function findMapBlocker(
+  blockers: MapBlocker[],
   origin: Vec3,
   dir: Vec3,
   maxRange: number,
@@ -596,7 +610,7 @@ function findMapBlocker(
 ): { point: Vec3; dist: number } | null {
   let best: { point: Vec3; dist: number } | null = null;
   const blockerPadding = Math.min(extraRadius, 0.015);
-  for (const blocker of MAP_BLOCKERS) {
+  for (const blocker of blockers) {
     const hit = rayBoxHit(origin, dir, blocker, blockerPadding, maxRange);
     if (!hit) continue;
     if (hit.dist < 0.08) continue;
@@ -676,7 +690,7 @@ function snap(value: number, step: number) {
   return Math.round(value / step) * step;
 }
 
-function makeSpawnPair(): [SpawnPoint, SpawnPoint] {
+function makeSpawnPair(mapBlockers: MapBlocker[]): [SpawnPoint, SpawnPoint] {
   for (let i = 0; i < 80; i++) {
     const eastWest = Math.random() > 0.5;
     const offset = Math.round((Math.random() * 18 - 9) * 10) / 10;
@@ -691,7 +705,7 @@ function makeSpawnPair(): [SpawnPoint, SpawnPoint] {
           { x: offset, z: -15 + jitterA, ry: Math.PI },
           { x: -offset, z: 15 + jitterB, ry: 0 },
         ];
-    if (pair.every((spawn) => isSpawnClear(spawn)))
+    if (pair.every((spawn) => isSpawnClear(spawn, mapBlockers)))
       return Math.random() > 0.5 ? pair : [pair[1], pair[0]];
   }
 
@@ -701,16 +715,18 @@ function makeSpawnPair(): [SpawnPoint, SpawnPoint] {
   ];
 }
 
-function isSpawnClear(spawn: SpawnPoint) {
+function isSpawnClear(spawn: SpawnPoint, mapBlockers: MapBlocker[]) {
   const pad = {
     min: { x: spawn.x - 1.2, y: 0, z: spawn.z - 1.2 },
     max: { x: spawn.x + 1.2, y: 2, z: spawn.z + 1.2 },
   };
-  return !MAP_BLOCKERS.some((blocker) => boxesIntersect(blocker, pad));
+  return !mapBlockers.some((blocker) => boxesIntersect(blocker, pad));
 }
 
 function respawn(conn: Connected) {
-  const sp = roundSpawns[conn.slot >= 0 ? conn.slot : 0];
+  const room = rooms.get(conn.roomId);
+  if (!room) return;
+  const sp = room.roundSpawns[conn.slot >= 0 ? conn.slot : 0];
   if (conn.reloadTimer) {
     clearTimeout(conn.reloadTimer);
     conn.reloadTimer = null;
@@ -730,6 +746,63 @@ function respawn(conn: Connected) {
 
 function normalizeClass(value: unknown): PlayerClass {
   return value === 'mage' || value === 'assassin' || value === 'gi' ? value : 'gi';
+}
+
+function getRoom(sessionId: string): Room {
+  let room = rooms.get(sessionId);
+  if (room) return room;
+  const mapSeed = Math.floor(Math.random() * 1_000_000_000);
+  const mapBlockers = buildMapBlockers(mapSeed);
+  room = {
+    id: sessionId,
+    players: new Map(),
+    trainingDummy: makeTrainingDummy(),
+    mapSeed,
+    mapBlockers,
+    roundSpawns: makeSpawnPair(mapBlockers),
+  };
+  rooms.set(sessionId, room);
+  return room;
+}
+
+function makeTrainingDummy(): TrainingDummy {
+  return {
+    id: 'training-dummy',
+    state: {
+      id: 'training-dummy',
+      name: 'Training Dummy',
+      className: 'mage',
+      px: 0,
+      py: 0,
+      pz: 0,
+      ry: Math.PI,
+      rx: 0,
+      lean: 0,
+      crouch: false,
+      hp: 999999,
+      maxHp: 999999,
+      ammo: CLASS_STATS.mage.maxAmmo,
+      maxAmmo: CLASS_STATS.mage.maxAmmo,
+      score: 0,
+    },
+    joined: true,
+    roundLocked: false,
+    respawnTimer: null,
+  };
+}
+
+function sessionFromRequest(req: IncomingMessage): string {
+  const raw = new URL(req.url ?? '/', 'http://localhost').searchParams.get('session');
+  return normalizeSessionId(raw);
+}
+
+function normalizeSessionId(value: string | null): string {
+  const cleaned =
+    value
+      ?.toLowerCase()
+      .replace(/[^a-z0-9-]/g, '')
+      .slice(0, 32) ?? '';
+  return cleaned.length >= 4 ? cleaned : 'lobby';
 }
 
 type Vec3 = { x: number; y: number; z: number };
@@ -971,11 +1044,53 @@ function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function broadcast(msg: ServerMessage) {
+function broadcastToRoom(room: Room, msg: ServerMessage, exceptId?: string) {
   const data = JSON.stringify(msg);
-  for (const p of players.values()) {
+  for (const p of room.players.values()) {
+    if (p.id === exceptId) continue;
     if (p.ws.readyState === WebSocket.OPEN) p.ws.send(data);
   }
 }
 
-console.log(`[server] listening on :${PORT}`);
+function serveStatic(req: IncomingMessage, res: ServerResponse) {
+  if (req.url?.startsWith('/?') || req.url === '/') {
+    sendStaticFile(res, join(STATIC_ROOT, 'index.html'));
+    return;
+  }
+
+  const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname);
+  const requested = resolve(join(STATIC_ROOT, pathname));
+  if (!requested.startsWith(STATIC_ROOT) || !existsSync(requested)) {
+    sendStaticFile(res, join(STATIC_ROOT, 'index.html'));
+    return;
+  }
+
+  const filePath = statSync(requested).isDirectory() ? join(requested, 'index.html') : requested;
+  sendStaticFile(res, filePath);
+}
+
+function sendStaticFile(res: ServerResponse, filePath: string) {
+  if (!existsSync(filePath)) {
+    res.writeHead(404);
+    res.end('Build the client first with npm --prefix client run build.');
+    return;
+  }
+  res.writeHead(200, { 'content-type': mimeType(filePath) });
+  createReadStream(filePath).pipe(res);
+}
+
+function mimeType(filePath: string) {
+  const ext = extname(filePath);
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js') return 'text/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  return 'application/octet-stream';
+}
+
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`[server] listening on :${PORT}`);
+});
