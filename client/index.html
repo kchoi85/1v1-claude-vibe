@@ -485,10 +485,63 @@
         border-color: #6cf;
         background: rgba(102, 204, 255, 0.14);
       }
-      #overlay .help {
+      #overlay .controls-help {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(178px, 1fr));
+        gap: 8px 12px;
+        width: min(520px, calc(100vw - 88px));
+        margin: 20px auto 0;
+        padding: 0;
+        list-style: none;
+        text-align: left;
         font-size: 12px;
-        opacity: 0.7;
-        margin-top: 18px;
+      }
+      #overlay .controls-help li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 30px;
+        padding: 6px 8px;
+        box-sizing: border-box;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.78);
+      }
+      #overlay .control-icon {
+        flex: 0 0 auto;
+        min-width: 42px;
+        height: 22px;
+        display: inline-grid;
+        place-items: center;
+        padding: 0 6px;
+        box-sizing: border-box;
+        border: 1px solid rgba(102, 204, 255, 0.35);
+        border-radius: 5px;
+        background: rgba(102, 204, 255, 0.12);
+        color: #d9f5ff;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+      }
+      #overlay .control-icon.mouse {
+        min-width: 30px;
+        width: 30px;
+        border-radius: 10px 10px 7px 7px;
+      }
+      #overlay .control-icon.mouse::before {
+        content: '';
+        width: 1px;
+        height: 8px;
+        background: rgba(217, 245, 255, 0.75);
+        transform: translateY(-3px);
+      }
+      #overlay .control-text {
+        white-space: normal;
+      }
+      #play-text .controls-help {
+        grid-template-columns: 1fr;
+        width: min(360px, calc(100vw - 80px));
       }
     </style>
   </head>
@@ -580,17 +633,69 @@
               </svg>
             </button>
           </div>
-          <div class="help">
-            WASD move &middot; Q/E peek &middot; Shift sprint &middot; Space jump &middot; Ctrl
-            crouch &middot; Right click zoom/special &middot; R reload &middot; Shift+Enter chat
-          </div>
+          <ul class="controls-help">
+            <li>
+              <span class="control-icon">WASD</span>
+              <span class="control-text">Move</span>
+            </li>
+            <li>
+              <span class="control-icon">Q/E</span>
+              <span class="control-text">Peek</span>
+            </li>
+            <li>
+              <span class="control-icon">Shift</span>
+              <span class="control-text">Sprint</span>
+            </li>
+            <li>
+              <span class="control-icon">Space</span>
+              <span class="control-text">Jump</span>
+            </li>
+            <li>
+              <span class="control-icon">Ctrl</span>
+              <span class="control-text">Crouch</span>
+            </li>
+            <li>
+              <span class="control-icon mouse" aria-label="Right mouse"></span>
+              <span class="control-text">Zoom / special skill</span>
+            </li>
+            <li>
+              <span class="control-icon">R</span>
+              <span class="control-text">Reload</span>
+            </li>
+            <li>
+              <span class="control-icon">S+Enter</span>
+              <span class="control-text">All chat</span>
+            </li>
+          </ul>
         </div>
         <div id="play-text" style="display: none">
           Click to play
-          <div class="help">
-            WASD move &middot; Q/E peek &middot; Right click zoom/special &middot; R reload &middot;
-            Shift+Enter chat &middot; ESC release
-          </div>
+          <ul class="controls-help">
+            <li>
+              <span class="control-icon">WASD</span>
+              <span class="control-text">Move</span>
+            </li>
+            <li>
+              <span class="control-icon">Q/E</span>
+              <span class="control-text">Peek</span>
+            </li>
+            <li>
+              <span class="control-icon mouse" aria-label="Right mouse"></span>
+              <span class="control-text">Zoom / special skill</span>
+            </li>
+            <li>
+              <span class="control-icon">R</span>
+              <span class="control-text">Reload</span>
+            </li>
+            <li>
+              <span class="control-icon">S+Enter</span>
+              <span class="control-text">All chat</span>
+            </li>
+            <li>
+              <span class="control-icon">ESC</span>
+              <span class="control-text">Release cursor</span>
+            </li>
+          </ul>
         </div>
       </div>
     </div>
