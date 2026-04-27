@@ -13,8 +13,8 @@ export const CLASS_MOVE: Record<PlayerClass, { walk: number; sprint: number }> =
 };
 
 export const CLASS_MAX_HP: Record<PlayerClass, number> = {
-  gi: 150,
-  mage: 100,
+  gi: 200,
+  mage: 150,
   assassin: 100,
 };
 

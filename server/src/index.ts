@@ -58,10 +58,15 @@ const CLASS_STATS: Record<
   PlayerClass,
   { maxHp: number; maxAmmo: number; cooldownMs: number; reloadMs: number }
 > = {
-  gi: { maxHp: 150, maxAmmo: 30, cooldownMs: 85, reloadMs: 1250 },
-  mage: { maxHp: 100, maxAmmo: 999, cooldownMs: 650, reloadMs: 0 },
+  gi: { maxHp: 200, maxAmmo: 30, cooldownMs: 85, reloadMs: 1250 },
+  mage: { maxHp: 150, maxAmmo: 999, cooldownMs: 650, reloadMs: 0 },
   assassin: { maxHp: 100, maxAmmo: 999, cooldownMs: 620, reloadMs: 0 },
 };
+
+const HEADSHOT_FULL_KILL_RANGE = 28;
+const HEADSHOT_FALLOFF_END = 60;
+const HEADSHOT_CLOSE_SCALE = 0.8;
+const HEADSHOT_FAR_SCALE = 0.6;
 
 const ATTACKS: Record<
   AttackKind,
@@ -74,9 +79,9 @@ const ATTACKS: Record<
     melee?: boolean;
   }
 > = {
-  'gi-shot': { className: 'gi', damage: 10, range: 80, radius: 0.04 },
-  'mage-shot': { className: 'mage', damage: 30, range: 55, radius: 0.28 },
-  'mage-charged': { className: 'mage', damage: 18, range: 48, radius: 0.24, cooldownMs: 1100 },
+  'gi-shot': { className: 'gi', damage: 12, range: 80, radius: 0.04 },
+  'mage-shot': { className: 'mage', damage: 40, range: 55, radius: 0.28 },
+  'mage-charged': { className: 'mage', damage: 20, range: 48, radius: 0.24, cooldownMs: 1100 },
   'assassin-slash': { className: 'assassin', damage: 25, range: 2.25, radius: 0.22, melee: true },
   'assassin-charged': {
     className: 'assassin',
@@ -472,11 +477,22 @@ function findHit(
 
 function damageForHit(spec: (typeof ATTACKS)[AttackKind], hit: HitResult): number {
   if (hit.part === 'head' && spec.className !== 'assassin') {
-    return isTrainingDummy(hit.target) ? spec.damage * 3 : hit.target.state.hp;
+    if (isTrainingDummy(hit.target)) return spec.damage * 3;
+    if (hit.dist <= HEADSHOT_FULL_KILL_RANGE) return hit.target.state.hp;
+    return Math.max(1, Math.floor(hit.target.state.hp * headshotFalloffScale(hit.dist)));
   }
   if (spec.className !== 'gi') return spec.damage;
   if (hit.part === 'torso') return spec.damage;
   return Math.max(1, Math.round(spec.damage * 0.5));
+}
+
+function headshotFalloffScale(dist: number) {
+  const t = clamp(
+    (dist - HEADSHOT_FULL_KILL_RANGE) / (HEADSHOT_FALLOFF_END - HEADSHOT_FULL_KILL_RANGE),
+    0,
+    1,
+  );
+  return HEADSHOT_CLOSE_SCALE + (HEADSHOT_FAR_SCALE - HEADSHOT_CLOSE_SCALE) * t;
 }
 
 function combatTargets(room: Room): CombatTarget[] {

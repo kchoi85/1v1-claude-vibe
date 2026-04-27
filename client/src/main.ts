@@ -239,8 +239,8 @@ const player = {
 
 const localStats = {
   className: 'gi' as PlayerClass,
-  hp: 150,
-  maxHp: 150,
+  hp: CLASS_MAX_HP.gi,
+  maxHp: CLASS_MAX_HP.gi,
   ammo: 30,
   maxAmmo: 30,
   score: 0,
