@@ -65,8 +65,9 @@ const CLASS_STATS: Record<
 
 const HEADSHOT_FULL_KILL_RANGE = 28;
 const HEADSHOT_FALLOFF_END = 60;
-const HEADSHOT_CLOSE_SCALE = 0.65;
-const HEADSHOT_FAR_SCALE = 0.45;
+const HEADSHOT_CLOSE_DAMAGE = 200;
+const HEADSHOT_FALLOFF_START_DAMAGE = 130;
+const HEADSHOT_FALLOFF_END_DAMAGE = 90;
 
 const ATTACKS: Record<
   AttackKind,
@@ -488,25 +489,25 @@ function damageForHit(
   hit: HitResult,
 ): number {
   if (hit.part === 'head' && spec.className !== 'assassin' && kind !== 'mage-charged') {
-    if (isTrainingDummy(hit.target)) return spec.damage * 3;
-    if (hit.dist <= HEADSHOT_FULL_KILL_RANGE) return hit.target.state.hp;
-    return Math.min(
-      hit.target.state.hp - 1,
-      Math.max(1, Math.floor(hit.target.state.hp * headshotFalloffScale(hit.dist))),
-    );
+    if (isTrainingDummy(hit.target)) return HEADSHOT_CLOSE_DAMAGE;
+    return headshotDamageForDistance(hit.dist);
   }
   if (spec.className !== 'gi') return spec.damage;
   if (hit.part === 'torso') return spec.damage;
   return Math.max(1, Math.round(spec.damage * 0.5));
 }
 
-function headshotFalloffScale(dist: number) {
+function headshotDamageForDistance(dist: number) {
+  if (dist <= HEADSHOT_FULL_KILL_RANGE) return HEADSHOT_CLOSE_DAMAGE;
   const t = clamp(
     (dist - HEADSHOT_FULL_KILL_RANGE) / (HEADSHOT_FALLOFF_END - HEADSHOT_FULL_KILL_RANGE),
     0,
     1,
   );
-  return HEADSHOT_CLOSE_SCALE + (HEADSHOT_FAR_SCALE - HEADSHOT_CLOSE_SCALE) * t;
+  return Math.round(
+    HEADSHOT_FALLOFF_START_DAMAGE +
+      (HEADSHOT_FALLOFF_END_DAMAGE - HEADSHOT_FALLOFF_START_DAMAGE) * t,
+  );
 }
 
 function combatTargets(room: Room): CombatTarget[] {
